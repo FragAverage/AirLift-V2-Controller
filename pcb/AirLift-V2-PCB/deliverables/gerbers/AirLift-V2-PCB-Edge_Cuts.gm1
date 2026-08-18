@@ -1,0 +1,26 @@
+%TF.GenerationSoftware,KiCad,Pcbnew,9.0.9-9.0.9~ubuntu24.04.1*%
+%TF.CreationDate,2026-08-18T10:44:49+00:00*%
+%TF.ProjectId,AirLift-V2-PCB,4169724c-6966-4742-9d56-322d5043422e,rev?*%
+%TF.SameCoordinates,Original*%
+%TF.FileFunction,Profile,NP*%
+%FSLAX46Y46*%
+G04 Gerber Fmt 4.6, Leading zero omitted, Abs format (unit mm)*
+G04 Created by KiCad (PCBNEW 9.0.9-9.0.9~ubuntu24.04.1) date 2026-08-18 10:44:49*
+%MOMM*%
+%LPD*%
+G01*
+G04 APERTURE LIST*
+%TA.AperFunction,Profile*%
+%ADD10C,0.150000*%
+%TD*%
+G04 APERTURE END LIST*
+D10*
+X0Y0D02*
+X129930476Y0D01*
+X0Y-115049500D02*
+X0Y0D01*
+X129930476Y0D02*
+X129930476Y-115049500D01*
+X129930476Y-115049500D02*
+X0Y-115049500D01*
+M02*
