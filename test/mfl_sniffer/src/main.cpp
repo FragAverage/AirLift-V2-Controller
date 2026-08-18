@@ -111,6 +111,10 @@ static ButtonState decode(const uint32_t widths[kPulsesPerMessage])
     if (widths[i] < kBitThresholdUs) value |= 1 << (7 - i);
   }
   ButtonState s;
+  // value == 0 is idle (confirmed on every no-button capture) and trivially
+  // satisfies all four masks (0 & anything == 0) — without this check idle
+  // would decode as all four buttons "pressed" simultaneously.
+  if (value == 0) return s;
   s.on    = (value & 110) == 0;
   s.io    = (value & 218) == 0;
   s.plus  = (value & 182) == 0;
