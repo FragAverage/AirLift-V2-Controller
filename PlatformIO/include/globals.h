@@ -41,6 +41,10 @@ extern volatile uint32_t lastManifoldReplyMs;
 // Cached preset target pressures last seen on the wire (PSI integer).
 extern volatile uint8_t lastPresetTargetFrontPsi;
 extern volatile uint8_t lastPresetTargetRearPsi;
+// millis() of the last 01 16 47 target broadcast (0 = none seen since boot).
+// Without it a freshly-booted, all-zero preset table would "match" the equally
+// zero cached target and report preset 1 to the display.
+extern volatile uint32_t lastPresetTargetMs;
 
 // Per-preset target pressures (front/rear PSI) configured via the web UI.
 // 0 = unset / don't trigger.
@@ -75,6 +79,11 @@ extern volatile bool     canBroadcastEnabled;
 extern volatile uint32_t canBroadcastId;
 extern volatile uint32_t canBroadcastSent;
 extern volatile uint32_t canBroadcastErrors;
+
+// ESP-NOW pressure broadcast to the slave display (see espnow_tx.h).
+extern volatile bool     espnowEnabled;
+extern volatile uint32_t espnowSent;
+extern volatile uint32_t espnowErrors;
 
 extern volatile bool     savvyCanWifiEnabled;
 extern volatile bool     savvyCanSerialEnabled;

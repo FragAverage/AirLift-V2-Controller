@@ -58,7 +58,13 @@ static void powerApplyLightSleep(bool enable)
 #if POWER_HAS_PM
   if (!g_cfg.enableAutoLightSleep)
     return;
+  // IDF 5 (Arduino core 3.x) renamed esp_pm_config_esp32_t -> esp_pm_config_t.
+  // Both cores are in the wild for this board, so accept either.
+#if ESP_IDF_VERSION_MAJOR >= 5
   esp_pm_config_t pm = {};
+#else
+  esp_pm_config_esp32_t pm = {};
+#endif
   pm.max_freq_mhz = g_cfg.cpuFreqActiveMhz;
   pm.min_freq_mhz = g_cfg.cpuFreqReducedMhz;
   pm.light_sleep_enable = enable;

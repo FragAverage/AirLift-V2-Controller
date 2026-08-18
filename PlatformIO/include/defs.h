@@ -338,6 +338,25 @@ constexpr uint32_t kInterceptManualPressWindowMs = 1500;
 // bags. CAN mode already has its own silence timeout, so this only gates GPIO.
 constexpr uint32_t ignitionOffGraceMs   = 10000;
 
+// ---------------------------------------------------------------------------
+// ESP-NOW broadcast (firmware -> slave display, see ../SlaveDisplay)
+//   24-byte AirLiftData packet (airlift_espnow.h) to FF:FF:FF:FF:FF:FF.
+// ---------------------------------------------------------------------------
+// The display pins its radio to a fixed channel at boot (its ESPNOW_WIFI_CHANNEL
+// build flag) because it never associates with anything. Our soft-AP therefore
+// has to sit on that same channel or the packets are never heard.
+constexpr uint8_t  kEspNowChannel   = 1;
+constexpr uint32_t kEspNowPeriodMs  = 100;   // ~10 Hz
+// A held button is only "held" while its polls keep arriving (~5/s from the
+// handheld); past this it has been released.
+constexpr uint32_t kEspNowButtonFreshMs = 400;
+// No manifold reply for this long -> report NO SIGNAL rather than stale values.
+constexpr uint32_t kEspNowLinStaleMs    = 3000;
+// Pressure-trend direction detection (see espnow_tx.cpp).
+constexpr uint32_t kEspNowTrendWindowMs  = 400;
+constexpr int32_t  kEspNowTrendRawThresh = 2;     // raw counts (PSI*2) = 1 psi
+constexpr uint32_t kEspNowTrendHoldMs    = 1200;  // no movement for this long = idle
+
 constexpr uint8_t kZeroPresetManual = 0xFF;
 
 // After waking from reduced power the handheld is re-powered from cold and must

@@ -228,6 +228,7 @@ bool parseHandheldPoll(const AirliftFrame& f) {
     portENTER_CRITICAL(&airliftMux);
     lastPresetTargetFrontPsi = front;
     lastPresetTargetRearPsi  = rear;
+    lastPresetTargetMs       = millis();
     // Preset learn mode: the user armed a specific slot in the UI; store this
     // target into THAT slot so the slot number matches the physical button they
     // just pressed (the wire carries no preset index):

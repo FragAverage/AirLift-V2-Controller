@@ -1,0 +1,271 @@
+#include "display.h"
+
+#include <TFT_eSPI.h>
+
+#include "config.h"
+
+namespace display {
+namespace {
+
+TFT_eSPI tft = TFT_eSPI();
+
+// ---------------------------------------------------------------------------
+// Off-screen buffers, one per box geometry.
+//
+// Painting a value as fillRect-then-drawString puts a blank black box on the
+// glass for as long as the text takes to render, which reads as a flicker on
+// every update. Composing into a sprite and pushing it means the old value is
+// overwritten by the new one in a single SPI burst — no intermediate state.
+//
+// Allocated once at boot and reused, so nothing churns the heap at runtime.
+// 16bpp: 156x58 = 18.1k, 156x28 = 8.7k, 320x22 = 14.1k -> ~41k total.
+// ---------------------------------------------------------------------------
+TFT_eSprite sprCorner = TFT_eSprite(&tft);
+TFT_eSprite sprStrip  = TFT_eSprite(&tft);
+TFT_eSprite sprStatus = TFT_eSprite(&tft);
+bool spritesReady = false;
+
+// --- corner geometry -------------------------------------------------------
+struct Cell {
+  const char* label;
+  int16_t     x;
+  int16_t     y;
+};
+
+// Index order matches the diff cache below: FL, FR, RL, RR.
+const Cell kCells[4] = {
+  {"FL", 0,      0},
+  {"FR", CELL_W, 0},
+  {"RL", 0,      CELL_H},
+  {"RR", CELL_W, CELL_H},
+};
+
+// --- diff cache ------------------------------------------------------------
+// Nothing is repainted unless the rendered *text* would differ, so a stream of
+// jittery floats that all format to "138" costs zero SPI traffic.
+bool    primed = false;             // false until the first update() paints
+char    lastCorner[4][8] = {};
+char    lastTank[8]      = {};
+char    lastPreset[12]   = {};
+uint8_t lastStatus       = 0xFF;
+bool    lastSignalOk     = true;
+
+// Whole psi only. Sub-psi resolution is noise on an air suspension gauge and
+// churns the last digit on every packet, which reads as a flickering display.
+void formatPsi(float psi, char* out, size_t n) {
+  if (isnan(psi) || psi < -0.5f) {
+    snprintf(out, n, "---");
+  } else {
+    snprintf(out, n, "%.0f", psi);
+  }
+}
+
+void statusText(uint8_t status, const char** text, uint16_t* colour) {
+  switch (status) {
+    case AIRLIFT_RAISING:  *text = "RAISING";   *colour = COL_RAISING;  break;
+    case AIRLIFT_LOWERING: *text = "LOWERING";  *colour = COL_LOWERING; break;
+    case AIRLIFT_IDLE:     *text = "IDLE";      *colour = COL_IDLE;     break;
+    default:               *text = "NO SIGNAL"; *colour = COL_NOSIGNAL; break;
+  }
+}
+
+// Compose the value centred in its box off-screen, then push the finished box
+// to the glass in one go. Falls back to a direct clear-and-draw if the sprite
+// could not be allocated — a flickering gauge beats a blank one.
+void drawValue(TFT_eSprite& spr, int16_t x, int16_t y, int16_t w, int16_t h,
+               const char* text, uint16_t colour, uint8_t font) {
+  if (!spritesReady) {
+    tft.fillRect(x, y, w, h, COL_BG);
+    tft.setTextColor(colour, COL_BG);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(text, x + w / 2, y + h / 2, font);
+    return;
+  }
+
+  spr.fillSprite(COL_BG);
+  spr.setTextColor(colour, COL_BG);
+  spr.setTextDatum(MC_DATUM);
+  spr.drawString(text, w / 2, h / 2, font);
+  spr.pushSprite(x, y);
+}
+
+bool createSprites() {
+  sprCorner.setColorDepth(16);
+  sprStrip.setColorDepth(16);
+  sprStatus.setColorDepth(16);
+
+  const bool ok =
+      sprCorner.createSprite(CELL_W - 4, CELL_VALUE_H) != nullptr &&
+      sprStrip.createSprite(CELL_W - 4, STRIP_VALUE_H) != nullptr &&
+      sprStatus.createSprite(SCREEN_W, STATUS_H) != nullptr;
+
+  if (!ok) {
+    sprCorner.deleteSprite();
+    sprStrip.deleteSprite();
+    sprStatus.deleteSprite();
+  }
+  return ok;
+}
+
+}  // namespace
+
+void begin() {
+  // Backlight starts dark so the panel's power-on garbage never reaches the
+  // driver's eye — splash() (or drawStaticLayout) brings it up once there is
+  // something worth looking at.
+  setBacklight(0);
+
+  tft.init();
+  tft.setRotation(1);  // landscape, 320x240
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(TL_DATUM);
+
+  spritesReady = createSprites();
+  if (!spritesReady) {
+    Serial.println("[TFT] sprite alloc failed — falling back to direct draw");
+  }
+}
+
+void setBacklight(uint8_t percent) {
+  if (percent > 100) percent = 100;
+  const uint32_t maxDuty = (1u << BACKLIGHT_PWM_BITS) - 1;
+  uint32_t duty = (maxDuty * percent) / 100;
+  // The panel's BL line is active high on this board; invert if TFT_BACKLIGHT_ON
+  // is ever changed to LOW.
+#if TFT_BACKLIGHT_ON == LOW
+  duty = maxDuty - duty;
+#endif
+
+  // Attach on first use only — re-running ledcSetup on every fade step would
+  // glitch the output.
+  static bool attached = false;
+  if (!attached) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcAttach(TFT_BL, BACKLIGHT_PWM_FREQ, BACKLIGHT_PWM_BITS);
+#else
+    ledcSetup(BACKLIGHT_PWM_CH, BACKLIGHT_PWM_FREQ, BACKLIGHT_PWM_BITS);
+    ledcAttachPin(TFT_BL, BACKLIGHT_PWM_CH);
+#endif
+    attached = true;
+  }
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(TFT_BL, duty);
+#else
+  ledcWrite(BACKLIGHT_PWM_CH, duty);
+#endif
+}
+
+void splash() {
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(MC_DATUM);
+
+  // Font 6 is digits-only, so the handle uses Font 4 at double size (52px).
+  tft.setTextColor(COL_VALUE, COL_BG);
+  tft.setTextSize(2);
+  tft.drawString(SPLASH_HANDLE, SCREEN_W / 2, 96, 4);
+  tft.setTextSize(1);
+
+  tft.drawFastHLine(SCREEN_W / 2 - 70, 132, 140, COL_DIVIDER);
+
+  tft.setTextColor(COL_PRESET, COL_BG);
+  tft.drawString("AIRLIFT V2", SCREEN_W / 2, 156, 4);
+
+  tft.setTextColor(COL_LABEL, COL_BG);
+  tft.drawString(SLAVE_FW_VERSION, SCREEN_W / 2, 186, 2);
+
+  // Fade up rather than snapping on — the panel is already painted, so this
+  // reveals the splash instead of flashing the driver.
+  for (uint16_t t = 0; t <= SPLASH_FADE_MS; t += 20) {
+    setBacklight((BACKLIGHT_PCT * t) / SPLASH_FADE_MS);
+    delay(20);
+  }
+  setBacklight(BACKLIGHT_PCT);
+
+  delay(SPLASH_HOLD_MS);
+}
+
+void drawStaticLayout() {
+  tft.fillScreen(COL_BG);
+
+  // 2x2 grid rules
+  tft.drawFastVLine(CELL_W - 1, 0, GRID_H, COL_DIVIDER);
+  tft.drawFastHLine(0, CELL_H - 1, SCREEN_W, COL_DIVIDER);
+
+  // strip + status bar rules
+  tft.drawFastHLine(0, STRIP_Y - 1, SCREEN_W, COL_DIVIDER);
+  tft.drawFastVLine(CELL_W - 1, STRIP_Y, STRIP_H, COL_DIVIDER);
+  tft.drawFastHLine(0, STATUS_Y - 1, SCREEN_W, COL_DIVIDER);
+
+  // corner captions
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(COL_LABEL, COL_BG);
+  for (const Cell& c : kCells) {
+    tft.drawString(c.label, c.x + 6, c.y + 4, 2);
+  }
+
+  // tank + preset captions
+  tft.setTextColor(COL_TANK, COL_BG);
+  tft.drawString("TANK", 6, STRIP_Y + 4, 2);
+  tft.setTextColor(COL_PRESET, COL_BG);
+  tft.drawString("PRESET", CELL_W + 6, STRIP_Y + 4, 2);
+
+  primed = false;  // force every value to paint on the next update()
+
+  // Belt and braces: begin() leaves the backlight dark, so make sure it is up
+  // even if splash() was skipped.
+  setBacklight(BACKLIGHT_PCT);
+}
+
+void update(const AirLiftData& d, bool signalOk) {
+  // A lost/regained link re-colours every pressure, so treat it like a full
+  // repaint trigger rather than diffing each value against a stale colour.
+  const bool forceAll = !primed || (signalOk != lastSignalOk);
+  const uint16_t valueColour = signalOk ? COL_VALUE : COL_STALE;
+  const uint16_t tankColour  = signalOk ? COL_TANK  : COL_STALE;
+
+  const float corners[4] = {d.fl, d.fr, d.rl, d.rr};
+  for (uint8_t i = 0; i < 4; i++) {
+    char buf[8];
+    formatPsi(corners[i], buf, sizeof(buf));
+    if (forceAll || strcmp(buf, lastCorner[i]) != 0) {
+      drawValue(sprCorner, kCells[i].x + 2, kCells[i].y + CELL_VALUE_TOP,
+                CELL_W - 4, CELL_VALUE_H, buf, valueColour, 6);
+      strncpy(lastCorner[i], buf, sizeof(lastCorner[i]) - 1);
+      lastCorner[i][sizeof(lastCorner[i]) - 1] = '\0';
+    }
+  }
+
+  char tank[8];
+  formatPsi(d.tank, tank, sizeof(tank));
+  if (forceAll || strcmp(tank, lastTank) != 0) {
+    char withUnit[12];
+    snprintf(withUnit, sizeof(withUnit), "%s PSI", tank);
+    drawValue(sprStrip, 2, STRIP_VALUE_TOP, CELL_W - 4, STRIP_VALUE_H,
+              withUnit, tankColour, 4);
+    strncpy(lastTank, tank, sizeof(lastTank) - 1);
+    lastTank[sizeof(lastTank) - 1] = '\0';
+  }
+
+  const char* preset = presetName(d.preset);
+  if (forceAll || strcmp(preset, lastPreset) != 0) {
+    drawValue(sprStrip, CELL_W + 2, STRIP_VALUE_TOP, CELL_W - 4, STRIP_VALUE_H,
+              preset, signalOk ? COL_PRESET : COL_STALE, 4);
+    strncpy(lastPreset, preset, sizeof(lastPreset) - 1);
+    lastPreset[sizeof(lastPreset) - 1] = '\0';
+  }
+
+  const uint8_t status = signalOk ? d.status : AIRLIFT_NO_SIGNAL;
+  if (forceAll || status != lastStatus) {
+    const char* text;
+    uint16_t    colour;
+    statusText(status, &text, &colour);
+    drawValue(sprStatus, 0, STATUS_Y, SCREEN_W, STATUS_H, text, colour, 2);
+    lastStatus = status;
+  }
+
+  lastSignalOk = signalOk;
+  primed       = true;
+}
+
+}  // namespace display

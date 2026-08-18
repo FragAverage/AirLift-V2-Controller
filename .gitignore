@@ -1,1 +1,19 @@
+# macOS
 .DS_Store
+
+# Editors
+.vscode/
+
+# PlatformIO build output / fetched libraries
+.pio/
+
+# Superseded PCB revisions kept around locally only
+pcb/_to_delete/
+
+# KiCad per-user project state and auto-backups (not design data)
+*.kicad_prl
+*-backups/
+fp-info-cache
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*.pre-compact-*.kicad_pcb

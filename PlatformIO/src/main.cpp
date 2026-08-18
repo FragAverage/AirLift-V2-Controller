@@ -3,6 +3,7 @@
 #include "API.h"
 #include "CAN.h"
 #include "defs.h"
+#include "espnow_tx.h"
 #include "io.h"
 #include "power_manager.h"
 #include "SavvyCAN.h"
@@ -13,6 +14,8 @@ void setup() {
   canInit();
   setupWiFi();
   setupApiServer();
+  // ESP-NOW rides the soft-AP's radio, so it can only start once WiFi is up.
+  espnowTxInit();
   savvyCanInit();
 
   // Universal reduced-power module: turns WiFi off after the last web client

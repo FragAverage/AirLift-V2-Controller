@@ -8,6 +8,7 @@
 #include "API.h"
 #include "CAN.h"
 #include "defs.h"
+#include "espnow_tx.h"
 #include "globals.h"
 #include "io.h"
 
@@ -359,6 +360,7 @@ static void ignitionTask(void* arg) {
     pollCanRx();
     canBroadcastTick();
     serviceDeferredWifi();
+    espnowTxTick();
     const bool ign = ignPresent();
     const uint32_t now = millis();
     tickManualTarget(now);

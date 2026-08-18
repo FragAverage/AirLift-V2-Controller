@@ -309,6 +309,28 @@
       </article>
 
       <article class="card">
+        <h2>Slave Display (ESP-NOW)</h2>
+        <p class="help">
+          Broadcasts pressures, the active preset and an idle/raising/lowering
+          state to the cluster display at ~10&nbsp;Hz. It is a one-way broadcast
+          &mdash; nothing is received and the display needs no pairing.
+          The AP runs on channel&nbsp;1 to match the display's fixed channel.
+          While this is on and the ignition is on, the WiFi radio stays up
+          (reduced power still engages normally with the ignition off).
+        </p>
+        <label class="toggle-row">
+          <span class="toggle-label">Broadcast to slave display</span>
+          <input type="checkbox" id="espnowEnabled">
+        </label>
+        <div class="brightness-row">
+          <span class="toggle-label">Packets sent / errors</span>
+          <div class="brightness-controls">
+            <span id="espnowSent">--</span> / <span id="espnowErrors">--</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
         <h2>CAN Broadcast</h2>
         <p class="help">
           When enabled, the firmware transmits an 8-byte frame at ~10 Hz on the

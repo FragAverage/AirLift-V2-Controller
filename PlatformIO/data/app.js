@@ -110,7 +110,7 @@ function init() {
 function initSettings() {
   // Checkboxes — save immediately on change
   const checkboxIds = ["passThroughMode", "airOutOnIgnOff", "ignitionSenseGpio", "canBroadcastEnabled",
-    "airUpOnFobDouble", "airDownOnFobDouble"];
+    "espnowEnabled", "airUpOnFobDouble", "airDownOnFobDouble"];
   checkboxIds.forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", () => saveSetting(id, el.checked));
@@ -261,6 +261,10 @@ async function loadStatus() {
     if (bcSent) bcSent.textContent = s.canBroadcastSent ?? "--";
     const bcErr  = document.getElementById("canBcErrors");
     if (bcErr)  bcErr.textContent  = s.canBroadcastErrors ?? "--";
+    const nowSent = document.getElementById("espnowSent");
+    if (nowSent) nowSent.textContent = s.espnowSent ?? "--";
+    const nowErr  = document.getElementById("espnowErrors");
+    if (nowErr)  nowErr.textContent  = s.espnowErrors ?? "--";
     const comfortLock = document.getElementById("comfortLockState");
     if (comfortLock) comfortLock.textContent = s.comfortLockState || "Unknown";
     const savvyDrops = document.getElementById("savvyCanDrops");
@@ -399,6 +403,7 @@ function renderSettings(s) {
   cb("airDownOnFobDouble", s.airDownOnFobDouble);
   cb("passThroughMode",   s.passThroughMode);
   cb("canBroadcastEnabled", s.canBroadcastEnabled);
+  cb("espnowEnabled", s.espnowEnabled);
   cb("usePowertrainCan", s.usePowertrainCan);
   cb("useComfortCan", s.useComfortCan);
   cb("savvyCanWifiEnabled", s.savvyCanWifiEnabled);

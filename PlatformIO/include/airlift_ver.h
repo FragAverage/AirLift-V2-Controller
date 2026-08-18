@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // Firmware version
 // ---------------------------------------------------------------------------
-#define FW_VERSION "2.10"
+#define FW_VERSION "2.11"
 
 /*
 
@@ -29,5 +29,14 @@ V2.10 - power management + wake fixes:
         * Command mode sends the handheld only idle-looking acks and suppresses
           the manifold's status / pressure frames, so it no longer flags a comms
           error while we drive a preset.
+
+V2.11 - ESP-NOW broadcast to the slave cluster display (../SlaveDisplay):
+        * 24-byte AirLiftData packet (airlift_espnow.h) broadcast at ~10 Hz —
+          four corners, tank, active preset, idle/raising/lowering state.
+        * Soft-AP channel pinned to kEspNowChannel so it matches the channel the
+          display parks on; peers ride the AP interface, no pairing.
+        * The radio is held up while the broadcast is enabled AND the ignition is
+          on, so the gauge stays live while driving; reduced power with the
+          ignition off is unchanged.
 
 */

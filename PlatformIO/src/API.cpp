@@ -8,6 +8,7 @@
 #include "CAN.h"
 #include "SavvyCAN.h"
 #include "defs.h"
+#include "espnow_tx.h"
 #include "globals.h"
 #include "io.h"
 #include "power_manager.h"
@@ -32,6 +33,7 @@ static const char* kKeyCanMinFps     = "canMinFps";
 static const char* kKeyBootDelay     = "bootDelay";
 static const char* kKeyCanBcEn       = "canBcEn";
 static const char* kKeyCanBcId       = "canBcId";
+static const char* kKeyEspNow         = "espnowEn";
 static const char* kKeySavvyWifi      = "savvyWifi";
 static const char* kKeySavvySerial    = "savvySerial";
 static const char* kKeyPowertrainCan  = "powertrainCan";
@@ -94,6 +96,7 @@ void loadPreferences() {
     if (id > kCanBroadcastIdMax) id = kCanBroadcastIdDefault;
     canBroadcastId = id;
   }
+  espnowEnabled = preferences.getBool(kKeyEspNow, true);
   savvyCanWifiEnabled = preferences.getBool(kKeySavvyWifi, false);
   savvyCanSerialEnabled = preferences.getBool(kKeySavvySerial, false);
   if (savvyCanSerialEnabled) savvyCanWifiEnabled = false;
@@ -106,7 +109,10 @@ void setupWiFi() {
   WiFi.hostname(wifiHostName);
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(IPAddress(192, 168, 1, 1), IPAddress(192, 168, 1, 1), IPAddress(255, 255, 255, 0));
-  WiFi.softAP(wifiHostName);
+  // Channel is pinned (rather than left to the default) because the slave
+  // display parks its radio on kEspNowChannel at boot and never associates —
+  // if the AP lands elsewhere, ESP-NOW packets are simply never heard.
+  WiFi.softAP(wifiHostName, nullptr, kEspNowChannel);
   WiFi.setSleep(false);
   DEBUG_WIFI("AP up: SSID=%s  IP=%s", wifiHostName, WiFi.softAPIP().toString().c_str());
 }
@@ -177,6 +183,10 @@ void setupApiServer() {
     doc["canBroadcastId"]    = canBroadcastId;
     doc["canBroadcastSent"]  = canBroadcastSent;
     doc["canBroadcastErrors"] = canBroadcastErrors;
+    doc["espnowEnabled"]     = (bool)espnowEnabled;
+    doc["espnowRunning"]     = espnowTxRunning();
+    doc["espnowSent"]        = espnowSent;
+    doc["espnowErrors"]      = espnowErrors;
     doc["savvyCanWifiEnabled"] = (bool)savvyCanWifiEnabled;
     doc["savvyCanSerialEnabled"] = (bool)savvyCanSerialEnabled;
     doc["savvyCanFramesDropped"] = savvyCanFramesDropped;
@@ -238,6 +248,7 @@ void setupApiServer() {
     doc["controllerBootDelayMs"] = controllerBootDelayMs;
     doc["canBroadcastEnabled"] = (bool)canBroadcastEnabled;
     doc["canBroadcastId"]      = canBroadcastId;
+    doc["espnowEnabled"]       = (bool)espnowEnabled;
     doc["savvyCanWifiEnabled"] = (bool)savvyCanWifiEnabled;
     doc["savvyCanSerialEnabled"] = (bool)savvyCanSerialEnabled;
     doc["usePowertrainCan"] = (bool)usePowertrainCan;
@@ -322,6 +333,11 @@ void setupApiServer() {
       if (bcId > kCanBroadcastIdMax) bcId = kCanBroadcastIdMax;
       canBroadcastId = bcId;
 
+      const bool oldEspnow = espnowEnabled;
+      if (!doc["espnowEnabled"].isNull()) {
+        espnowEnabled = doc["espnowEnabled"].as<bool>();
+      }
+
       if (!doc["savvyCanWifiEnabled"].isNull()) {
         savvyCanSetWifiEnabled(doc["savvyCanWifiEnabled"].as<bool>());
       }
@@ -354,10 +370,19 @@ void setupApiServer() {
       preferences.putUShort(kKeyBootDelay,     controllerBootDelayMs);
       preferences.putBool(kKeyCanBcEn, (bool)canBroadcastEnabled);
       preferences.putUInt(kKeyCanBcId, canBroadcastId);
+      preferences.putBool(kKeyEspNow, (bool)espnowEnabled);
       preferences.putBool(kKeySavvyWifi, (bool)savvyCanWifiEnabled);
       preferences.putBool(kKeySavvySerial, (bool)savvyCanSerialEnabled);
       preferences.putBool(kKeyPowertrainCan, (bool)usePowertrainCan);
       preferences.putBool(kKeyComfortCan, (bool)useComfortCan);
+
+      // Start / stop the ESP-NOW broadcast to the slave display. init() tears
+      // down any previous session itself, so a re-enable is safe to repeat.
+      if (espnowEnabled != oldEspnow) {
+        if (espnowEnabled) espnowTxInit();
+        else               espnowTxStop();
+        logLine("ESP-NOW display broadcast %s", espnowEnabled ? "on" : "off");
+      }
 
       // Driver configuration changes require a full reinitialization:
       // LISTEN_ONLY <-> NORMAL, broadcast ID, or 500 <-> 125 kbit/s source.
@@ -720,6 +745,12 @@ void setupApiServer() {
 // is running). CAN only WAKES us from reduced power via pollCanRx(); it does
 // not keep us awake here.
 bool powerIsBusy() {
+  // The slave display is a live gauge cluster: it must keep updating whenever
+  // the car is running, and ESP-NOW dies with the radio. So while the broadcast
+  // is enabled AND the ignition is on, the radio stays up. Ignition off (car
+  // parked, display unpowered) still reduces exactly as before, which is the
+  // case the regulator-heat rule was written for.
+  if (espnowEnabled && ignitionOn) return true;
   return WiFi.softAPgetStationNum() > 0;
 }
 
@@ -729,6 +760,8 @@ bool powerIsBusy() {
 // means pure pass-through — no lingering comms issues while WiFi is off.
 void powerOnEnterReduced() {
   server.end();
+  // The radio is about to go away underneath ESP-NOW; close it cleanly first.
+  espnowTxStop();
   portENTER_CRITICAL(&airliftMux);
   desiredMode           = handheldMode;   // stop overriding — follow the controller
   presetEnterUntilMs    = 0;
@@ -771,6 +804,7 @@ void serviceDeferredWifi() {
   s_wifiWakePending = false;
   setupWiFi();
   server.begin();
+  espnowTxInit();
   DEBUG_PWR("WiFi restored %lums after wake (%s)",
         (unsigned long)sinceWake, capped ? "cap" : "lin-ok");
 }

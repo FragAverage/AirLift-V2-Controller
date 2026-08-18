@@ -20,6 +20,7 @@ volatile uint32_t lastManifoldReplyMs = 0;
 
 volatile uint8_t lastPresetTargetFrontPsi = 0;
 volatile uint8_t lastPresetTargetRearPsi  = 0;
+volatile uint32_t lastPresetTargetMs      = 0;
 
 uint8_t presetFrontPsi[kPresetCount] = {0,0,0,0,0,0,0,0};
 uint8_t presetRearPsi[kPresetCount]  = {0,0,0,0,0,0,0,0};
@@ -46,6 +47,9 @@ volatile bool     canBroadcastEnabled  = false;
 volatile uint32_t canBroadcastId       = kCanBroadcastIdDefault;
 volatile uint32_t canBroadcastSent     = 0;
 volatile uint32_t canBroadcastErrors   = 0;
+volatile bool     espnowEnabled       = true;
+volatile uint32_t espnowSent           = 0;
+volatile uint32_t espnowErrors         = 0;
 volatile bool     savvyCanWifiEnabled  = false;
 volatile bool     savvyCanSerialEnabled = false;
 volatile uint32_t savvyCanFramesDropped = 0;

@@ -35,6 +35,7 @@ the ESP32 **TWAI** peripheral for CAN.
 | SavvyCAN GVRET | Capture/inject CAN over Wi-Fi (TCP 23) or USB serial for reverse-engineering |
 | Lock/unlock air actions | A double fob-unlock airs the car up; a double fob-lock airs it down (both individually selectable) |
 | High-side driver | Powers the controller whenever the vehicle is awake, with configurable CAN silence / min-FPS thresholds |
+| Slave display | ~10 Hz ESP-NOW broadcast of pressures / preset / air state to a cluster-mounted CYD display (`SlaveDisplay/`) |
 | Wi-Fi UI | Overview, Presets, Settings, Diagnostics, OTA |
 | Power management | Auto Wi-Fi-off + CPU reduction 1 minute after the last client disconnects; a fresh CAN burst wakes it back up |
 | OTA updates | Flash new firmware from the browser over Wi-Fi |
@@ -301,6 +302,40 @@ ignitionTask → sees flag → queueTarget(air-up | air-down) → manifold drive
 [6] seq counter (free-running)   [7] reserved (0)
 ```
 
+### Slave Display Broadcast (firmware → ESP-NOW)
+
+A one-way ~10 Hz (`kEspNowPeriodMs = 100`) broadcast to `FF:FF:FF:FF:FF:FF` of
+the 24-byte `AirLiftData` struct in `include/airlift_espnow.h` — the receiving
+end is the cluster display in **`SlaveDisplay/`**. Broadcast means no pairing and
+no knowledge of the display's MAC; nothing is ever received.
+
+```
+float fl, fr, rl, rr, tank   // PSI
+uint8 preset                 // 1-8 active preset, 0 = none
+uint8 status                 // 0 idle, 1 raising, 2 lowering, 3 no signal
+```
+
+The struct must stay **byte-identical** to `SlaveDisplay/include/airlift_espnow.h`
+(a `static_assert` on both sides guards the size; the receiver can only check the
+length, not the field layout).
+
+Two things the LIN wire does not carry directly, so the firmware derives them:
+
+- **Active preset** — the wire has no preset index, only the target pressures
+  from `01 16 47`. Those are matched back against the configured/learned preset
+  table, which is the same mapping the UI's preset list uses. No match, or not in
+  PRESET mode, sends `0` and the display shows `---`.
+- **Raising / lowering** — the compressor bit only says the pump is running
+  (also true while it refills the tank). Direction comes from a button being held
+  right now (ours or the handheld's), and otherwise from the trend of the corner
+  pressures, which also covers preset moves where the manifold closed-loops with
+  no button held at all.
+
+Because ESP-NOW rides the Wi-Fi radio, the soft-AP channel is pinned to
+`kEspNowChannel` (1) to match the display's fixed `ESPNOW_WIFI_CHANNEL`, and the
+radio is held up while the broadcast is enabled **and** the ignition is on — see
+Power Management below. Toggle in **Settings → Slave Display (ESP-NOW)**.
+
 ### SavvyCAN
 
 Enable one setting in **Settings → SavvyCAN**:
@@ -331,6 +366,12 @@ behaviour:
    **burst of ≥ `kCanWakeFrameMin` (8) frames** arrives, the board wakes and
    rebuilds the AP for the idle window. It sleeps again 1 minute later if no
    client connected.
+
+> With the ESP-NOW slave display enabled, the radio is **held up while the
+> ignition is on** — a cluster gauge that goes blank a minute into a drive is
+> worse than the regulator heat it saves. Ignition off (car parked, display
+> unpowered) reduces exactly as described above. Turn the broadcast off in
+> Settings to restore the old behaviour in full.
 
 > Lock/unlock parsing and air-up/down run in `ignitionTask` and are **independent
 > of Wi-Fi** — a fob double-unlock airs the car up whether or not the WiFi is
@@ -434,6 +475,8 @@ V2.01 — CAN/TWAI bridge (Powertrain/Comfort), pressure broadcast, SavvyCAN GVR
 V2.10 — power management (Wi-Fi-client idle + CAN wake-on-burst),
         deferred WiFi bring-up on wake, high-side auto-release, fob boot-delay,
         command-mode idle masking, and single-master gated serial debug.
+V2.11 — ESP-NOW broadcast to the slave cluster display, AP channel pinned,
+        radio held up while the ignition is on.
 ```
 
 ---
