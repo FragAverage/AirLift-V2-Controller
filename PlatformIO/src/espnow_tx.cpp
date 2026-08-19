@@ -7,11 +7,52 @@
 #include "airlift_espnow.h"
 #include "defs.h"
 #include "globals.h"
+#include "mfl.h"
+#include "tasks.h"
 
 namespace {
 
 // Broadcast: the display needs no pairing and we need no knowledge of its MAC.
 const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+uint32_t s_lastButtonSendMs = 0;
+uint8_t  s_buttonSeq        = 0;
+
+uint8_t buttonsToBitmask(const MflButtons& b) {
+  uint8_t mask = 0;
+  if (b.plus)  mask |= MFL_BIT_PLUS;
+  if (b.minus) mask |= MFL_BIT_MINUS;
+  if (b.set)   mask |= MFL_BIT_SET;
+  if (b.io)    mask |= MFL_BIT_IO;
+  return mask;
+}
+
+// Arduino-ESP32 3.x (IDF 5) changed the recv callback signature; support both,
+// same as the display's own receiver (SlaveDisplay/src/espnow_link.cpp).
+void handleCommand(const uint8_t* data, int len) {
+  if (len != (int)sizeof(AirLiftCommand)) return;
+  AirLiftCommand cmd;
+  memcpy(&cmd, data, sizeof(cmd));
+  switch (cmd.cmd) {
+    case CMD_SELECT_PRESET:
+      queuePresetByIndex(cmd.param, kInterceptPresetHoldMsDefault, "MFL menu");
+      break;
+    default:
+      break;
+  }
+}
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void onRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  (void)info;
+  handleCommand(data, len);
+}
+#else
+void onRecv(const uint8_t* mac, const uint8_t* data, int len) {
+  (void)mac;
+  handleCommand(data, len);
+}
+#endif
 
 bool     s_running    = false;
 uint32_t s_lastSendMs = 0;
@@ -176,8 +217,11 @@ void espnowTxInit() {
     return;
   }
 
-  s_running    = true;
-  s_lastSendMs = 0;
+  esp_now_register_recv_cb(onRecv);
+
+  s_running          = true;
+  s_lastSendMs       = 0;
+  s_lastButtonSendMs = 0;
 
   uint8_t ch = 0;
   wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
@@ -199,23 +243,39 @@ void espnowTxTick() {
 
   const uint32_t now = millis();
   tickTrend(now);
-  if ((uint32_t)(now - s_lastSendMs) < kEspNowPeriodMs) return;
-  s_lastSendMs = now;
 
-  AirLiftData d = {};
-  // Corner pressures are stored raw (PSI*2); /2.0f keeps the half-psi step the
-  // manifold actually reports. Tank is already stored in PSI.
-  d.fl     = pressureFL / 2.0f;
-  d.fr     = pressureFR / 2.0f;
-  d.rl     = pressureRL / 2.0f;
-  d.rr     = pressureRR / 2.0f;
-  d.tank   = (float)pressureTank;
-  d.preset = derivePreset();
-  d.status = deriveStatus(now);
+  if ((uint32_t)(now - s_lastSendMs) >= kEspNowPeriodMs) {
+    s_lastSendMs = now;
 
-  if (esp_now_send(kBroadcastMac, (const uint8_t*)&d, sizeof(d)) == ESP_OK) {
-    espnowSent++;
-  } else {
-    espnowErrors++;
+    AirLiftData d = {};
+    // Corner pressures are stored raw (PSI*2); /2.0f keeps the half-psi step
+    // the manifold actually reports. Tank is already stored in PSI.
+    d.fl     = pressureFL / 2.0f;
+    d.fr     = pressureFR / 2.0f;
+    d.rl     = pressureRL / 2.0f;
+    d.rr     = pressureRR / 2.0f;
+    d.tank   = (float)pressureTank;
+    d.preset = derivePreset();
+    d.status = deriveStatus(now);
+
+    if (esp_now_send(kBroadcastMac, (const uint8_t*)&d, sizeof(d)) == ESP_OK) {
+      espnowSent++;
+    } else {
+      espnowErrors++;
+    }
+  }
+
+  if ((uint32_t)(now - s_lastButtonSendMs) >= kEspNowButtonPeriodMs) {
+    s_lastButtonSendMs = now;
+
+    AirLiftButtons b = {};
+    b.buttons = buttonsToBitmask(mflRead());
+    b.seq     = s_buttonSeq++;
+
+    if (esp_now_send(kBroadcastMac, (const uint8_t*)&b, sizeof(b)) == ESP_OK) {
+      espnowSent++;
+    } else {
+      espnowErrors++;
+    }
   }
 }

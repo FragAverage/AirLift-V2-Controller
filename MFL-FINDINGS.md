@@ -120,17 +120,26 @@ names, to avoid future confusion.
 
 ## Next steps (firmware integration)
 
-1. Port the framing/decode logic from `test/mfl_sniffer/src/main.cpp` into
+1. ~~Port the framing/decode logic from `test/mfl_sniffer/src/main.cpp` into
    the main AirLift firmware as its own module, rather than copy-pasting
-   into existing files.
-2. Rename the decoded fields to match physical buttons (see mapping table),
-   not pazi88's original flag names.
-3. Decide button → action mapping (open question, also tracked in
-   `pcb/PCB-REQUIREMENTS.md`): current thinking is `PLUS`/`MINUS` → air
-   up/down (mirroring the existing fob-double-press pattern in
-   `CAN.cpp`/`tasks.cpp`), `SET`/`IO` → cycle presets or unassigned.
-4. Decide whether an MFL button press should participate in the existing
-   power-management wake logic alongside CAN traffic (currently the ESP32
-   never light-sleeps, so this may be moot — revisit if that changes).
-5. Move from the bench GPIO (18) to the production pin once the new PCB
-   pin map is finalized.
+   into existing files.~~ **Done** — `PlatformIO/include/mfl.h` /
+   `src/mfl.cpp`, on the production pin (GPIO34, see point 5 below).
+2. ~~Rename the decoded fields to match physical buttons (see mapping
+   table), not pazi88's original flag names.~~ **Done** — `MflButtons` in
+   `mfl.h` uses `plus`/`minus`/`set`/`io`, with a comment noting this wheel's
+   "SET" decodes as pazi88's `on` mask.
+3. Button → action mapping: **implemented differently from the original
+   plan.** Rather than PLUS/MINUS driving air up/down directly, all four
+   buttons now drive an on-screen menu on the Slave Display (`IO` =
+   enter/select, `PLUS`/`MINUS` = up/down, `SET` = back), with **preset
+   select** as the only action that reaches the manifold so far — see
+   `SlaveDisplay/include/menu.h` and `AirLiftButtons`/`AirLiftCommand` in
+   `airlift_espnow.h`. Direct air up/down on PLUS/MINUS (bypassing the menu)
+   remains an open option if the menu proves too slow for that.
+4. Still open: whether an MFL button press should participate in the
+   existing power-management wake logic alongside CAN traffic (currently the
+   ESP32 never light-sleeps, so this may be moot — revisit if that changes).
+5. ~~Move from the bench GPIO (18) to the production pin once the new PCB
+   pin map is finalized.~~ **Done** — GPIO34, confirmed on the fabricated
+   PCB's net list (`MFL_SIGNAL` → optocoupler → `MFL_IN` → `J_DEVKIT_L` pin
+   4) and set as `pinMflSignal` in `PlatformIO/include/defs.h`.

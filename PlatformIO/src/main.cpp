@@ -5,6 +5,7 @@
 #include "defs.h"
 #include "espnow_tx.h"
 #include "io.h"
+#include "mfl.h"
 #include "power_manager.h"
 #include "SavvyCAN.h"
 #include "tasks.h"
@@ -12,6 +13,7 @@
 void setup() {
   basicInit();
   canInit();
+  mflInit();
   setupWiFi();
   setupApiServer();
   // ESP-NOW rides the soft-AP's radio, so it can only start once WiFi is up.

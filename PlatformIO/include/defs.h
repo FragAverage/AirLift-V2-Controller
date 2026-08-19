@@ -21,6 +21,7 @@
 #define debugLIN    1        // [LIN]   AirLift LIN MITM (wire / mode / buttons)
 #define debugAPI    1        // [API]   REST / settings / OTA
 #define debugSavvy  1        // [SAVVY] SavvyCAN GVRET bridge
+#define debugMFL    1        // [MFL]   steering-wheel cruise-button decode
 
 #define serialDebugBaud 115200
 
@@ -96,6 +97,15 @@
 #define DEBUG_SAVVY_(x, ...)
 #endif
 
+// --- [MFL] steering-wheel cruise-button decode ---
+#if enableDebug && debugMFL
+#define DEBUG_MFL(x, ...)  Serial.printf("[MFL] " x "\n", ##__VA_ARGS__)
+#define DEBUG_MFL_(x, ...) Serial.printf("[MFL] " x, ##__VA_ARGS__)
+#else
+#define DEBUG_MFL(x, ...)
+#define DEBUG_MFL_(x, ...)
+#endif
+
 // ---------------------------------------------------------------------------
 // Pin assignments — MQB Steering Wheel Controller PCB
 // On-wire data is 9600-baud 8N1 UART via LIN transceivers.
@@ -126,6 +136,11 @@ constexpr int pinControllerPower = 21;   // HIGH = keep +12 V to handheld during
 // ignition on. Chosen instead of CAN presence for an instant ignition signal
 // not really suitable - will only ack. unlock OR lock (if wired to door modules).  Cannot tell the difference.
 constexpr int pinIgnitionSense = 39;
+
+// MFL steering-wheel cruise-button single-wire input (through the optocoupler
+// isolation stage — see pcb/PCB-REQUIREMENTS.md and MFL-FINDINGS.md). Input-
+// only pin, no internal pull, can't be accidentally driven as an output.
+constexpr int pinMflSignal = 34;
 
 // ---------------------------------------------------------------------------
 // Protocol — frame format A: FA-framed polls / responses
@@ -347,6 +362,9 @@ constexpr uint32_t ignitionOffGraceMs   = 10000;
 // has to sit on that same channel or the packets are never heard.
 constexpr uint8_t  kEspNowChannel   = 1;
 constexpr uint32_t kEspNowPeriodMs  = 100;   // ~10 Hz
+// MFL button-state broadcast (AirLiftButtons) — faster than the pressure
+// broadcast so on-screen menu navigation feels responsive.
+constexpr uint32_t kEspNowButtonPeriodMs = 50;   // ~20 Hz
 // A held button is only "held" while its polls keep arriving (~5/s from the
 // handheld); past this it has been released.
 constexpr uint32_t kEspNowButtonFreshMs = 400;

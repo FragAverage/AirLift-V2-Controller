@@ -261,6 +261,18 @@ static void manifoldToHandheldTask(void* arg) {
   }
 }
 
+void queuePresetByIndex(uint8_t index, uint32_t holdMs, const char* source) {
+  if (index >= kPresetCount) return;
+  portENTER_CRITICAL(&airliftMux);
+  desiredMode                = MODE_PRESET;
+  if (currentMode != MODE_PRESET) presetEnterUntilMs = millis() + 400;
+  pendingPresetFrontPsi      = presetFrontPsi[index];
+  pendingPresetRearPsi       = presetRearPsi[index];
+  pendingPresetRepeatUntilMs = millis() + holdMs;
+  portEXIT_CRITICAL(&airliftMux);
+  logLine("%s: preset %u", source, (unsigned)(index + 1));
+}
+
 // Ignition / power state machine. The ignition signal comes from one of two
 // sources (user-selectable): CAN presence (default) OR a hard-wired aux GPIO
 // (ignitionSenseGpio) which is instant and doesn't wait on a CAN silence
@@ -295,14 +307,7 @@ static void ignitionTask(void* arg) {
     if (passThroughMode) return;
     manualTargetActive = false;
     if (preset < kPresetCount) {
-      portENTER_CRITICAL(&airliftMux);
-      desiredMode                = MODE_PRESET;
-      if (currentMode != MODE_PRESET) presetEnterUntilMs = millis() + 400;
-      pendingPresetFrontPsi      = presetFrontPsi[preset];
-      pendingPresetRearPsi       = presetRearPsi[preset];
-      pendingPresetRepeatUntilMs = millis() + airOutDurationMs;
-      portEXIT_CRITICAL(&airliftMux);
-      logLine("%s: preset %u", source, (unsigned)(preset + 1));
+      queuePresetByIndex(preset, airOutDurationMs, source);
       return;
     }
 

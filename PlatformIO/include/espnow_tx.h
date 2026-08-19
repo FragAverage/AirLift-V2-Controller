@@ -3,11 +3,18 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// ESP-NOW pressure broadcast -> AirLift V2 slave display (../SlaveDisplay).
+// ESP-NOW link to the AirLift V2 slave display (../SlaveDisplay).
 //
-// Outbound only. The firmware broadcasts an AirLiftData packet (see
-// airlift_espnow.h) at ~10 Hz to FF:FF:FF:FF:FF:FF, so the display needs no
-// pairing and we need no knowledge of its MAC. Nothing is ever received.
+// Broadcasts two packet types to FF:FF:FF:FF:FF:FF, so the display needs no
+// pairing and we need no knowledge of its MAC:
+//   - AirLiftData (~10 Hz): corner/tank pressures, preset, status.
+//   - AirLiftButtons (~20 Hz): live MFL steering-wheel button state, for the
+//     display's on-screen menu.
+// Also RECEIVES AirLiftCommand from the display (a confirmed menu action,
+// e.g. "select preset N") and acts on it via queuePresetByIndex() — the only
+// inbound path this firmware has from the display. Same broadcast/no-pairing
+// trust model as the outbound data: unencrypted, sanity-checked by length
+// only (see airlift_espnow.h).
 //
 // The radio is shared with the soft-AP: ESP-NOW rides the AP interface on the
 // AP's channel, which is pinned to kEspNowChannel so it always matches the

@@ -524,16 +524,24 @@ void setupApiServer() {
         r = (uint8_t)(int)(doc["rearPsi"]  | 0);
       }
       uint32_t holdMs = doc["holdMs"] | kInterceptPresetHoldMsDefault;
-      portENTER_CRITICAL(&airliftMux);
-      // Hold PRESET: every handheld poll is now rewritten into preset traffic,
-      // pushing this target for `holdMs` then settling to the heartbeat.
-      desiredMode                = MODE_PRESET;
-      if (currentMode != MODE_PRESET) presetEnterUntilMs = millis() + 400;
-      pendingPresetFrontPsi      = f;
-      pendingPresetRearPsi       = r;
-      pendingPresetRepeatUntilMs = millis() + holdMs;
-      portEXIT_CRITICAL(&airliftMux);
-      logLine("intercept preset %u/%u psi hold=%lums", f, r, (unsigned long)holdMs);
+      if (doc["index"].is<int>()) {
+        // Hold PRESET: every handheld poll is now rewritten into preset
+        // traffic, pushing this target for `holdMs` then settling to the
+        // heartbeat.
+        queuePresetByIndex((uint8_t)(int)doc["index"], holdMs, "web intercept");
+      } else {
+        // Explicit frontPsi/rearPsi target — not one of the 8 stored preset
+        // slots, so queuePresetByIndex (which looks the pressures up FROM the
+        // table by index) doesn't apply here.
+        portENTER_CRITICAL(&airliftMux);
+        desiredMode                = MODE_PRESET;
+        if (currentMode != MODE_PRESET) presetEnterUntilMs = millis() + 400;
+        pendingPresetFrontPsi      = f;
+        pendingPresetRearPsi       = r;
+        pendingPresetRepeatUntilMs = millis() + holdMs;
+        portEXIT_CRITICAL(&airliftMux);
+        logLine("intercept preset %u/%u psi hold=%lums", f, r, (unsigned long)holdMs);
+      }
       req->send(200, "application/json", "{\"ok\":true}");
     }, nullptr, bodyAccum);
 
