@@ -37,6 +37,17 @@ void handleCommand(const uint8_t* data, int len) {
     case CMD_SELECT_PRESET:
       queuePresetByIndex(cmd.param, kInterceptPresetHoldMsDefault, "MFL menu");
       break;
+    case CMD_MANUAL_PRESS:
+      // Same heartbeat pattern as the web UI's "press" action: this call is
+      // expected to repeat (~20 Hz, once per AirLiftButtons frame) for as
+      // long as the physical MFL button stays held, each call extending the
+      // window. If the display stops sending (link drop, button released),
+      // the window simply expires — no explicit timeout logic needed here.
+      queueManualButton(cmd.param, kInterceptManualPressWindowMs);
+      break;
+    case CMD_MANUAL_RELEASE:
+      releaseManualButton();
+      break;
     default:
       break;
   }

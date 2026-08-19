@@ -193,6 +193,16 @@ constexpr uint8_t BTN_MANUAL_RR_UP   = 0x58;  // inflate RR
 constexpr uint8_t BTN_MANUAL_RR_DOWN = 0x68;  // deflate RR
 constexpr uint8_t BTN_MANUAL_ALL_UP   = 0x5F; // inflate all four simultaneously
 constexpr uint8_t BTN_MANUAL_ALL_DOWN = 0x6F; // deflate all four simultaneously
+// Axle-combined, same encoding: front = FL|FR = bit0|bit1 = 0x3, rear =
+// RL|RR = bit2|bit3 = 0xC. Extrapolated from the documented bit-scheme
+// above, NOT verified against a real capture the way individual corner
+// presses were (the physical handheld has no axle-only button to capture
+// from — same caveat BTN_MANUAL_ALL_UP/DOWN above already carries). Confirm
+// on your own manifold before relying on this for anything that matters.
+constexpr uint8_t BTN_MANUAL_FRONT_UP   = 0x53;  // inflate FL+FR
+constexpr uint8_t BTN_MANUAL_FRONT_DOWN = 0x63;  // deflate FL+FR
+constexpr uint8_t BTN_MANUAL_REAR_UP    = 0x5C;  // inflate RL+RR
+constexpr uint8_t BTN_MANUAL_REAR_DOWN  = 0x6C;  // deflate RL+RR
 constexpr uint8_t BTN_MANUAL_RELEASE = 0x00;
 constexpr uint8_t BTN_MANUAL_MODE_SWITCH = 0x80;   // press-and-hold 1+5
 

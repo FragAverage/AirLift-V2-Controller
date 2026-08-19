@@ -579,10 +579,7 @@ void setupApiServer() {
       else if (!strcmp(c, "ALL") && !strcmp(d, "down")) code = BTN_MANUAL_ALL_DOWN;
 
       if (!strcmp(action, "release")) {
-        portENTER_CRITICAL(&airliftMux);
-        pendingButtonCode    = 0;
-        pendingButtonRelease = true;
-        portEXIT_CRITICAL(&airliftMux);
+        releaseManualButton();
         logLine("intercept manual release");
         req->send(200, "application/json", "{\"ok\":true}");
         return;
@@ -598,15 +595,9 @@ void setupApiServer() {
       else if (!strcmp(action, "hold"))  window = holdMs ? holdMs : kInterceptManualPressWindowMs;
       else                                window = holdMs ? holdMs : kInterceptManualTapMsDefault;  // "tap"
 
-      portENTER_CRITICAL(&airliftMux);
       // A manual button implies MANUAL mode; transformHandheldFrame rewrites the
       // handheld's polls into this button press for the hold window.
-      desiredMode                = MODE_MANUAL;
-      presetEnterUntilMs         = 0;
-      pendingButtonCode          = code;
-      pendingButtonRepeatUntilMs = millis() + window;
-      pendingButtonRelease       = false;
-      portEXIT_CRITICAL(&airliftMux);
+      queueManualButton(code, window);
       logLine("intercept manual %s %s 0x%02X %s win=%lums",
               c, d, code, action, (unsigned long)window);
       req->send(200, "application/json", "{\"ok\":true}");

@@ -16,6 +16,17 @@ void startTasks();
 // that never had that gate (e.g. /api/intercept/preset).
 void queuePresetByIndex(uint8_t index, uint32_t holdMs, const char* source);
 
+// Queue a manual button (BTN_MANUAL_* from defs.h) as held for `windowMs`.
+// Repeated calls (a "press" heartbeat) extend the window rather than
+// stacking — same mechanism transformHandheldFrame() already rewrites
+// handheld polls through. Shared by the web UI (/api/intercept/manual's
+// press/hold/tap actions) and the MFL ESP-NOW command handler.
+void queueManualButton(uint8_t code, uint32_t windowMs);
+
+// Stop emitting the held button and queue one explicit button-up rewrite.
+// Shared by the same two callers as queueManualButton().
+void releaseManualButton();
+
 // Queue a stored frame for injection on the manifold UART.
 // holdMs > 0 ⇒ repeatedly inject the frame at ~50 ms intervals for that
 // duration (mimics a press-and-hold button such as air-out).

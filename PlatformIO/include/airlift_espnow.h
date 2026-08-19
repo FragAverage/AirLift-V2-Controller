@@ -57,9 +57,9 @@ enum : uint8_t {
 
 // ---------------------------------------------------------------------------
 // Slave -> master: a confirmed menu action. Broadcast, unencrypted, same
-// trust model as AirLiftData/AirLiftButtons — the only thing a command can do
-// is select from the vehicle's own pre-configured preset table, no arbitrary
-// pressure injection.
+// trust model as AirLiftData/AirLiftButtons — every command is one of a
+// fixed, small set (a preset slot, or one of the eight discrete manual
+// button codes below), never an arbitrary pressure value.
 // ---------------------------------------------------------------------------
 typedef struct {
   uint8_t cmd;
@@ -70,5 +70,18 @@ static_assert(sizeof(AirLiftCommand) == 2,
               "AirLiftCommand layout changed — the master must be updated to match");
 
 enum : uint8_t {
-  CMD_SELECT_PRESET = 1,   // param = preset index, 0-based
+  CMD_SELECT_PRESET  = 1,   // param = preset index, 0-based
+  CMD_MANUAL_PRESS   = 2,   // param = one of defs.h's BTN_MANUAL_* codes;
+                             // repeated sends extend the hold window (same
+                             // heartbeat the web UI's "press" action uses)
+  CMD_MANUAL_RELEASE = 3,   // param unused
 };
+
+// NOTE: unlike AirLiftData/AirLiftButtons, the BTN_MANUAL_* codes CMD_MANUAL_
+// PRESS's param carries are NOT redefined here — they already exist as
+// `constexpr uint8_t` in defs.h (this project's canonical copy, used
+// throughout the LIN/button logic), and every file here that needs them
+// already includes defs.h. Redeclaring the same names as an enum in this
+// header would conflict wherever both are included. The display side has no
+// defs.h equivalent, so its copy of this file (SlaveDisplay/include/
+// airlift_espnow.h) DOES define them — see the comment there.

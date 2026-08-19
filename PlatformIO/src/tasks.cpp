@@ -273,6 +273,23 @@ void queuePresetByIndex(uint8_t index, uint32_t holdMs, const char* source) {
   logLine("%s: preset %u", source, (unsigned)(index + 1));
 }
 
+void queueManualButton(uint8_t code, uint32_t windowMs) {
+  portENTER_CRITICAL(&airliftMux);
+  desiredMode                = MODE_MANUAL;
+  presetEnterUntilMs         = 0;
+  pendingButtonCode          = code;
+  pendingButtonRepeatUntilMs = millis() + windowMs;
+  pendingButtonRelease       = false;
+  portEXIT_CRITICAL(&airliftMux);
+}
+
+void releaseManualButton() {
+  portENTER_CRITICAL(&airliftMux);
+  pendingButtonCode    = 0;
+  pendingButtonRelease = true;
+  portEXIT_CRITICAL(&airliftMux);
+}
+
 // Ignition / power state machine. The ignition signal comes from one of two
 // sources (user-selectable): CAN presence (default) OR a hard-wired aux GPIO
 // (ignitionSenseGpio) which is instant and doesn't wait on a CAN silence
