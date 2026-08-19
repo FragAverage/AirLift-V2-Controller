@@ -1,6 +1,7 @@
 #pragma once
 
 #include "airlift_espnow.h"
+#include "menu.h"
 
 namespace display {
 
@@ -24,5 +25,14 @@ void drawStaticLayout();
 // `signalOk` false renders the held pressures dimmed and forces the status bar
 // to NO SIGNAL regardless of what the last packet said.
 void update(const AirLiftData& d, bool signalOk);
+
+// Renders the MFL menu (see menu.h) instead of the gauge. Called in place of
+// update() whenever menu::active() is true. Diffs against its own
+// last-rendered state the same way update() does — EXCEPT `force`, which
+// must be true on the first call after the gauge was showing (the physical
+// screen holds gauge pixels the diff cache doesn't know about, so a view
+// that happens to match the cache would otherwise wrongly skip the redraw
+// and leave stale gauge content on screen).
+void drawMenu(const menu::View& view, bool force);
 
 }  // namespace display

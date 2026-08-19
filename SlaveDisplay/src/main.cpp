@@ -14,6 +14,7 @@
 #include "config.h"
 #include "display.h"
 #include "espnow_link.h"
+#include "menu.h"
 #include "touch.h"
 
 namespace {
@@ -80,26 +81,48 @@ void setup() {
 }
 
 void loop() {
-#if DEMO_MODE
-  static uint32_t nextTick = 0;
-  if ((int32_t)(millis() - nextTick) >= 0) {
-    nextTick = millis() + DEMO_TICK_MS;
-    demoTick();
-    display::update(data, true);
-  }
-#else
-  if (espnow::take(data)) {
-    Serial.printf("[NOW] FL %.1f FR %.1f RL %.1f RR %.1f tank %.1f "
-                  "preset %u status %u\n",
-                  data.fl, data.fr, data.rl, data.rr, data.tank,
-                  data.preset, data.status);
+  // Menu state comes from the master's MFL button broadcast regardless of
+  // DEMO_MODE (that flag only fakes pressure telemetry).
+  menu::poll();
+
+  // A GAUGE<->MENU transition means the screen currently holds pixels from
+  // whichever mode isn't running any more — force the entered mode to
+  // repaint everything rather than trust either side's diff cache.
+  static bool wasMenuActive = false;
+  const bool  menuActive    = menu::active();
+  if (menuActive != wasMenuActive) {
+    if (menuActive) {
+      display::drawMenu(menu::currentView(), true);
+    } else {
+      display::drawStaticLayout();   // also resets update()'s diff cache
+    }
+    wasMenuActive = menuActive;
   }
 
-  // update() diffs internally, so calling it every pass is cheap — it only
-  // touches the panel when a rendered value actually changed (including the
-  // link going stale).
-  display::update(data, espnow::alive());
+  if (menuActive) {
+    display::drawMenu(menu::currentView(), false);
+  } else {
+#if DEMO_MODE
+    static uint32_t nextTick = 0;
+    if ((int32_t)(millis() - nextTick) >= 0) {
+      nextTick = millis() + DEMO_TICK_MS;
+      demoTick();
+      display::update(data, true);
+    }
+#else
+    if (espnow::take(data)) {
+      Serial.printf("[NOW] FL %.1f FR %.1f RL %.1f RR %.1f tank %.1f "
+                    "preset %u status %u\n",
+                    data.fl, data.fr, data.rl, data.rr, data.tank,
+                    data.preset, data.status);
+    }
+
+    // update() diffs internally, so calling it every pass is cheap — it only
+    // touches the panel when a rendered value actually changed (including
+    // the link going stale).
+    display::update(data, espnow::alive());
 #endif
+  }
 
   touch::poll();
   delay(10);

@@ -274,4 +274,66 @@ void update(const AirLiftData& d, bool signalOk) {
   primed       = true;
 }
 
+namespace {
+
+// --- menu diff cache ---------------------------------------------------
+// The menu only redraws on a button press, not a 10 Hz telemetry stream, so
+// (unlike update() above) a whole-screen redraw on every change is cheap
+// enough — no per-row sprite diffing needed.
+bool       menuPrimed    = false;
+menu::Mode lastMenuMode  = menu::Mode::GAUGE;
+uint8_t    lastMenuCursor = 0xFF;
+uint8_t    lastMenuCount  = 0xFF;
+char       lastMenuItems[8][16] = {};
+
+bool menuViewChanged(const menu::View& v) {
+  if (!menuPrimed) return true;
+  if (v.mode != lastMenuMode || v.cursor != lastMenuCursor ||
+      v.itemCount != lastMenuCount) {
+    return true;
+  }
+  for (uint8_t i = 0; i < v.itemCount; i++) {
+    if (strcmp(v.items[i], lastMenuItems[i]) != 0) return true;
+  }
+  return false;
+}
+
+void cacheMenuView(const menu::View& v) {
+  menuPrimed     = true;
+  lastMenuMode   = v.mode;
+  lastMenuCursor = v.cursor;
+  lastMenuCount  = v.itemCount;
+  for (uint8_t i = 0; i < v.itemCount && i < 8; i++) {
+    strncpy(lastMenuItems[i], v.items[i], sizeof(lastMenuItems[i]) - 1);
+    lastMenuItems[i][sizeof(lastMenuItems[i]) - 1] = '\0';
+  }
+}
+
+}  // namespace
+
+void drawMenu(const menu::View& view, bool force) {
+  if (!force && !menuViewChanged(view)) return;
+  cacheMenuView(view);
+
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_PRESET, COL_BG);
+  tft.drawString(view.title, GRID_X0 + GRID_W / 2, GRID_Y0 + 16, 4);
+
+  const int16_t top    = GRID_Y0 + 36;
+  const int16_t bottom = STATUS_Y + STATUS_H;
+  const uint8_t rows   = view.itemCount ? view.itemCount : 1;
+  const int16_t rowH   = (bottom - top) / rows;
+
+  for (uint8_t i = 0; i < view.itemCount; i++) {
+    const bool    selected = (i == view.cursor);
+    const int16_t y        = top + i * rowH;
+    if (selected) tft.fillRect(GRID_X0, y, GRID_W, rowH, COL_DIVIDER);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(selected ? COL_VALUE : COL_LABEL,
+                      selected ? COL_DIVIDER : COL_BG);
+    tft.drawString(view.items[i], GRID_X0 + GRID_W / 2, y + rowH / 2, 2);
+  }
+}
+
 }  // namespace display

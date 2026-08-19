@@ -484,4 +484,62 @@ void update(const AirLiftData& d, bool signalOk) {
   primed       = true;
 }
 
+namespace {
+
+// --- menu diff cache ---------------------------------------------------
+// The menu only redraws on a button press, not a 10 Hz telemetry stream, so
+// (unlike update() above) a whole-screen redraw on every change is cheap
+// enough here too.
+bool       menuPrimed     = false;
+menu::Mode lastMenuMode   = menu::Mode::GAUGE;
+uint8_t    lastMenuCursor = 0xFF;
+uint8_t    lastMenuCount  = 0xFF;
+char       lastMenuItems[8][16] = {};
+
+bool menuViewChanged(const menu::View& v) {
+  if (!menuPrimed) return true;
+  if (v.mode != lastMenuMode || v.cursor != lastMenuCursor ||
+      v.itemCount != lastMenuCount) {
+    return true;
+  }
+  for (uint8_t i = 0; i < v.itemCount; i++) {
+    if (strcmp(v.items[i], lastMenuItems[i]) != 0) return true;
+  }
+  return false;
+}
+
+void cacheMenuView(const menu::View& v) {
+  menuPrimed     = true;
+  lastMenuMode   = v.mode;
+  lastMenuCursor = v.cursor;
+  lastMenuCount  = v.itemCount;
+  for (uint8_t i = 0; i < v.itemCount && i < 8; i++) {
+    strncpy(lastMenuItems[i], v.items[i], sizeof(lastMenuItems[i]) - 1);
+    lastMenuItems[i][sizeof(lastMenuItems[i]) - 1] = '\0';
+  }
+}
+
+}  // namespace
+
+void drawMenu(const menu::View& view, bool force) {
+  if (!force && !menuViewChanged(view)) return;
+  cacheMenuView(view);
+
+  gfx->fillScreen(COL_BG);
+  drawCentered(SCREEN_W / 2, GRID_Y0 + 20, view.title, 3, COL_PRESET, COL_BG);
+
+  const int16_t top    = GRID_Y0 + 48;
+  const int16_t bottom = STATUS_Y + STATUS_H;
+  const uint8_t rows   = view.itemCount ? view.itemCount : 1;
+  const int16_t rowH   = (bottom - top) / rows;
+
+  for (uint8_t i = 0; i < view.itemCount; i++) {
+    const bool    selected = (i == view.cursor);
+    const int16_t y        = top + i * rowH;
+    if (selected) gfx->fillRect(GRID_X0, y, GRID_W, rowH, COL_DIVIDER);
+    drawCentered(GRID_X0 + GRID_W / 2, y + rowH / 2, view.items[i], LABEL_TEXTSIZE,
+                 selected ? COL_VALUE : COL_LABEL, selected ? COL_DIVIDER : COL_BG);
+  }
+}
+
 }  // namespace display

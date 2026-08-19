@@ -9,6 +9,9 @@
 namespace espnow {
 namespace {
 
+// Broadcast: no pairing, no knowledge of the master's MAC needed either way.
+const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
 // Written from the Wi-Fi task in the recv callback, read from loop() — guarded
 // by a spinlock so a half-updated struct can never be rendered.
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
@@ -16,20 +19,31 @@ volatile bool  newData      = false;
 AirLiftData    receivedData = {};
 volatile uint32_t lastRxMs  = 0;
 
+volatile bool  newButtons      = false;
+AirLiftButtons receivedButtons = {};
+
 void handlePacket(const uint8_t* mac, const uint8_t* data, int len) {
-  if (len != (int)sizeof(AirLiftData)) {
-    Serial.printf("[NOW] dropped packet: %d bytes, expected %u\n",
-                  len, (unsigned)sizeof(AirLiftData));
+  (void)mac;
+
+  if (len == (int)sizeof(AirLiftData)) {
+    portENTER_CRITICAL(&mux);
+    memcpy(&receivedData, data, sizeof(AirLiftData));
+    newData  = true;
+    lastRxMs = millis();
+    portEXIT_CRITICAL(&mux);
     return;
   }
 
-  portENTER_CRITICAL(&mux);
-  memcpy(&receivedData, data, sizeof(AirLiftData));
-  newData  = true;
-  lastRxMs = millis();
-  portEXIT_CRITICAL(&mux);
+  if (len == (int)sizeof(AirLiftButtons)) {
+    portENTER_CRITICAL(&mux);
+    memcpy(&receivedButtons, data, sizeof(AirLiftButtons));
+    newButtons = true;
+    portEXIT_CRITICAL(&mux);
+    return;
+  }
 
-  (void)mac;
+  Serial.printf("[NOW] dropped packet: %d bytes (expected %u or %u)\n", len,
+                (unsigned)sizeof(AirLiftData), (unsigned)sizeof(AirLiftButtons));
 }
 
 // Arduino-ESP32 3.x (IDF 5) changed the callback signature; support both.
@@ -65,6 +79,18 @@ void begin() {
   }
 
   esp_now_register_recv_cb(onRecv);
+
+  // Needed for sendCommand() — esp_now_send() requires a registered peer even
+  // for broadcast.
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, kBroadcastMac, sizeof(kBroadcastMac));
+  peer.channel = 0;   // "whatever channel we're already parked on"
+  peer.ifidx   = WIFI_IF_STA;
+  peer.encrypt = false;
+  if (esp_now_add_peer(&peer) != ESP_OK) {
+    Serial.println("[NOW] add_peer FAILED — sendCommand() will not work");
+  }
+
   Serial.println("[NOW] receiver ready");
 }
 
@@ -78,6 +104,25 @@ bool take(AirLiftData& out) {
   }
   portEXIT_CRITICAL(&mux);
   return got;
+}
+
+bool takeButtons(AirLiftButtons& out) {
+  bool got = false;
+  portENTER_CRITICAL(&mux);
+  if (newButtons) {
+    out        = receivedButtons;
+    newButtons = false;
+    got        = true;
+  }
+  portEXIT_CRITICAL(&mux);
+  return got;
+}
+
+void sendCommand(uint8_t cmd, uint8_t param) {
+  AirLiftCommand c;
+  c.cmd   = cmd;
+  c.param = param;
+  esp_now_send(kBroadcastMac, (const uint8_t*)&c, sizeof(c));
 }
 
 uint32_t lastPacketMs() {
