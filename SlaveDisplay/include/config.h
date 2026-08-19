@@ -253,16 +253,17 @@
 
 // Corner pressures are the primary readout, so they get the big font
 // (size-2, 16px tall) — big enough that a "FL:" style label wouldn't fit
-// alongside the value, so a single-letter axle label (F/R) sits in a
-// narrow left column instead, drawn once in drawStaticLayout() (it never
-// changes), with the two values of that axle split across the rest of the
-// width — same left/right = driver/passenger-side spatial convention the
-// other three boards' 2x2 grid uses, just without the box round it.
+// alongside the value, so a single-letter axle label (F/R) sits in a narrow
+// column centred in the middle of the row instead, drawn once in
+// drawStaticLayout() (it never changes), with the axle's two corner values
+// flanking it left/right — same left/right = driver/passenger-side spatial
+// convention the other three boards' 2x2 grid uses, just without the box
+// round it, and with the axle letter itself right where the grid's centre
+// divider would be.
 #define GAUGE_TEXTSIZE     2
-#define AXLE_LABEL_X       2
-#define AXLE_LABEL_COL_W   12   // reserved width before the two big values
-#define ROW_FRONT_Y        10   // F: big FL | big FR
-#define ROW_REAR_Y         28   // R: big RL | big RR
+#define AXLE_LABEL_COL_W   16   // centred column width for F/R
+#define ROW_FRONT_Y        10   // big FL | F | big FR
+#define ROW_REAR_Y         28   // big RL | R | big RR
 
 // Status used to be its own text row; now it's a single glyph in the top
 // right, out of the corner-values' way, so the freed space goes to the
@@ -270,7 +271,9 @@
 // No dedicated "no data yet" glyph — nothing to draw beats a stale-looking
 // blank icon.
 #define STATUS_ICON_Y      0
-#define STATUS_ICON_X      (SCREEN_W - 6)   // one 6px-wide char, size 1
+// 2px margin from the right edge (not SCREEN_W - 6, which touches it exactly)
+// so the burn-in pixel-shift (display_oled13.cpp) never clips it.
+#define STATUS_ICON_X      (SCREEN_W - 8)   // one 6px-wide char, size 1
 #define STATUS_CHAR_RAISING  '^'
 #define STATUS_CHAR_LOWERING 'v'
 #define STATUS_CHAR_NOSIGNAL 'X'

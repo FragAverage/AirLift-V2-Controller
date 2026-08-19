@@ -432,7 +432,11 @@ void drawStaticLayout() {
   drawCentered(GRID_X0 + CELL_W + CELL_W / 2, STRIP_Y + 20, "PRESET", LABEL_TEXTSIZE, COL_PRESET, COL_BG);
 
   primed = false;
-  setBacklight(BACKLIGHT_PCT);
+  // Restores the Settings screen's live brightness (menu.cpp), not the
+  // hardcoded default — this also runs every time the menu closes back to
+  // the gauge, and resetting to default there would silently undo a
+  // brightness change the moment you left Settings.
+  setBacklight(menu::currentBacklightPct());
 }
 
 void update(const AirLiftData& d, bool signalOk) {
@@ -489,18 +493,28 @@ namespace {
 // --- menu diff cache ---------------------------------------------------
 // The menu only redraws on a button press, not a 10 Hz telemetry stream, so
 // (unlike update() above) a whole-screen redraw on every change is cheap
-// enough here too.
-bool       menuPrimed     = false;
-menu::Mode lastMenuMode   = menu::Mode::GAUGE;
-uint8_t    lastMenuCursor = 0xFF;
-uint8_t    lastMenuCount  = 0xFF;
+// enough here too. MANUAL_ACTIVE is the exception: it tracks live pressures
+// instead of items[], since it updates continuously while a button is held
+// rather than only on navigation.
+bool       menuPrimed      = false;
+menu::Mode lastMenuMode    = menu::Mode::GAUGE;
+uint8_t    lastMenuCursor  = 0xFF;
+uint8_t    lastMenuCount   = 0xFF;
 char       lastMenuItems[8][16] = {};
+char       lastLeftPsi[6]  = {};
+char       lastRightPsi[6] = {};
+uint8_t    lastDirection   = 0xFF;
 
 bool menuViewChanged(const menu::View& v) {
   if (!menuPrimed) return true;
   if (v.mode != lastMenuMode || v.cursor != lastMenuCursor ||
       v.itemCount != lastMenuCount) {
     return true;
+  }
+  if (v.hasLivePressures) {
+    return strcmp(v.leftPsi, lastLeftPsi) != 0 ||
+           strcmp(v.rightPsi, lastRightPsi) != 0 ||
+           v.direction != lastDirection;
   }
   for (uint8_t i = 0; i < v.itemCount; i++) {
     if (strcmp(v.items[i], lastMenuItems[i]) != 0) return true;
@@ -517,6 +531,45 @@ void cacheMenuView(const menu::View& v) {
     strncpy(lastMenuItems[i], v.items[i], sizeof(lastMenuItems[i]) - 1);
     lastMenuItems[i][sizeof(lastMenuItems[i]) - 1] = '\0';
   }
+  strncpy(lastLeftPsi, v.leftPsi, sizeof(lastLeftPsi) - 1);
+  lastLeftPsi[sizeof(lastLeftPsi) - 1] = '\0';
+  strncpy(lastRightPsi, v.rightPsi, sizeof(lastRightPsi) - 1);
+  lastRightPsi[sizeof(lastRightPsi) - 1] = '\0';
+  lastDirection = v.direction;
+}
+
+// FRONT/REAR live control: two big pressure numbers either side of a
+// direction triangle, colour-coded (green raising / amber lowering / grey
+// idle) — this panel has 4x the other TFT board's pixel budget, so the
+// triangle and numbers go correspondingly bigger.
+void drawManualActive(const menu::View& view) {
+  gfx->fillScreen(COL_BG);
+  drawCentered(SCREEN_W / 2, GRID_Y0 + 20, view.title, 3, COL_PRESET, COL_BG);
+
+  const uint16_t valueColour = (view.direction == AIRLIFT_RAISING)  ? COL_RAISING
+                              : (view.direction == AIRLIFT_LOWERING) ? COL_LOWERING
+                                                                       : COL_LABEL;
+
+  const int16_t top    = GRID_Y0 + 48;
+  const int16_t bottom = STATUS_Y + STATUS_H;
+  const int16_t midY   = (top + bottom) / 2;
+
+  drawCentered(GRID_X0 + CELL_W / 2, midY, view.leftPsi, VALUE_TEXTSIZE_CORNER,
+               valueColour, COL_BG);
+  drawCentered(GRID_X0 + CELL_W + CELL_W / 2, midY, view.rightPsi,
+               VALUE_TEXTSIZE_CORNER, valueColour, COL_BG);
+
+  const int16_t cx   = GRID_X0 + CELL_W;
+  const int16_t triH = 24;
+  if (view.direction == AIRLIFT_RAISING) {
+    gfx->fillTriangle(cx, midY - triH, cx - triH, midY + triH, cx + triH, midY + triH, COL_RAISING);
+  } else if (view.direction == AIRLIFT_LOWERING) {
+    gfx->fillTriangle(cx, midY + triH, cx - triH, midY - triH, cx + triH, midY - triH, COL_LOWERING);
+  } else {
+    gfx->fillRect(cx - triH, midY - 2, triH * 2, 4, COL_LABEL);
+  }
+
+  drawCentered(SCREEN_W / 2, bottom - 24, "HOLD +/-", 2, COL_LABEL, COL_BG);
 }
 
 }  // namespace
@@ -524,6 +577,11 @@ void cacheMenuView(const menu::View& v) {
 void drawMenu(const menu::View& view, bool force) {
   if (!force && !menuViewChanged(view)) return;
   cacheMenuView(view);
+
+  if (view.mode == menu::Mode::MANUAL_ACTIVE) {
+    drawManualActive(view);
+    return;
+  }
 
   gfx->fillScreen(COL_BG);
   drawCentered(SCREEN_W / 2, GRID_Y0 + 20, view.title, 3, COL_PRESET, COL_BG);

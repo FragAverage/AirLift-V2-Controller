@@ -23,6 +23,28 @@ namespace {
 
 Adafruit_SH1106G oled(SCREEN_W, SCREEN_H, &Wire, -1);
 
+// --- burn-in mitigation --------------------------------------------------
+// The gauge view is on-screen almost all the time (menus auto-return after
+// MENU_IDLE_TIMEOUT_MS — see menu.cpp), so its static layout would otherwise
+// keep the exact same pixels lit indefinitely on this OLED. Every rotation
+// period, nudge the whole gauge layout by up to 1px in X/Y and force a full
+// repaint at the new position — small enough to be imperceptible, but no
+// pixel stays lit at the same physical spot forever. Since several elements
+// (right-hand values, bottom text row) already reach the panel's edge with
+// zero margin, a nonzero offset can clip a single edge pixel column/row on
+// those elements for part of the rotation — an intentional, minor trade for
+// real burn-in protection rather than a bug.
+constexpr int16_t  kBurnInOffsets[][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+constexpr uint8_t  kBurnInOffsetCount  = 4;
+constexpr uint32_t kBurnInRotateMs     = 5UL * 60UL * 1000UL;  // 5 minutes
+uint8_t  s_burnInIndex        = 0;
+uint32_t s_burnInLastRotateMs = 0;
+int16_t  s_offX = 0;
+int16_t  s_offY = 0;
+
+int16_t ox(int16_t x) { return (int16_t)(x + s_offX); }
+int16_t oy(int16_t y) { return (int16_t)(y + s_offY); }
+
 void formatPsi(float psi, char* out, size_t n) {
   if (isnan(psi) || psi < -0.5f) {
     snprintf(out, n, "--");
@@ -44,30 +66,32 @@ char statusChar(uint8_t status) {
 }
 
 void drawRowCentered(int16_t y, const char* text, uint8_t size) {
-  oled.fillRect(0, y, SCREEN_W, size * 8, SH110X_BLACK);
+  oled.fillRect(ox(0), oy(y), SCREEN_W, size * 8, SH110X_BLACK);
   oled.setTextSize(size);
   oled.setTextColor(SH110X_WHITE);
   int16_t  x1, y1;
   uint16_t w, h;
   oled.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  oled.setCursor((SCREEN_W - (int16_t)w) / 2 - x1, y);
+  oled.setCursor(ox((SCREEN_W - (int16_t)w) / 2 - x1), oy(y));
   oled.print(text);
 }
 
-// Corner values live in one of the two halves right of the axle-label
-// column (see config.h's AXLE_LABEL_COL_W comment) — same driver/passenger
-// left-right convention the other boards' 2x2 grid uses.
-constexpr int16_t kHalfW = (SCREEN_W - AXLE_LABEL_COL_W) / 2;
+// Corner values live either side of a centred axle-label column (see
+// config.h's AXLE_LABEL_COL_W comment) — same driver/passenger left-right
+// convention the other boards' 2x2 grid uses, with the axle letter sitting
+// where that grid's centre divider would be.
+constexpr int16_t kHalfW    = (SCREEN_W - AXLE_LABEL_COL_W) / 2;
+constexpr int16_t kAxleColX = kHalfW;   // start of the centred label column
 
 void drawBigValueHalf(int16_t y, bool leftHalf, const char* text) {
-  const int16_t xStart = AXLE_LABEL_COL_W + (leftHalf ? 0 : kHalfW);
-  oled.fillRect(xStart, y, kHalfW, GAUGE_TEXTSIZE * 8, SH110X_BLACK);
+  const int16_t xStart = leftHalf ? 0 : (kAxleColX + AXLE_LABEL_COL_W);
+  oled.fillRect(ox(xStart), oy(y), kHalfW, GAUGE_TEXTSIZE * 8, SH110X_BLACK);
   oled.setTextSize(GAUGE_TEXTSIZE);
   oled.setTextColor(SH110X_WHITE);
   int16_t  x1, y1;
   uint16_t w, h;
   oled.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  oled.setCursor(xStart + (kHalfW - (int16_t)w) / 2 - x1, y);
+  oled.setCursor(ox(xStart + (kHalfW - (int16_t)w) / 2 - x1), oy(y));
   oled.print(text);
 }
 
@@ -76,19 +100,38 @@ void drawBigValueHalf(int16_t y, bool leftHalf, const char* text) {
 void drawAxleLabels() {
   oled.setTextSize(1);
   oled.setTextColor(SH110X_WHITE);
-  oled.setCursor(AXLE_LABEL_X, ROW_FRONT_Y + (GAUGE_TEXTSIZE * 8 - 8) / 2);
+  const int16_t labelX = kAxleColX + (AXLE_LABEL_COL_W - 6) / 2;  // centre the 6px glyph
+  oled.setCursor(ox(labelX), oy(ROW_FRONT_Y + (GAUGE_TEXTSIZE * 8 - 8) / 2));
   oled.print('F');
-  oled.setCursor(AXLE_LABEL_X, ROW_REAR_Y + (GAUGE_TEXTSIZE * 8 - 8) / 2);
+  oled.setCursor(ox(labelX), oy(ROW_REAR_Y + (GAUGE_TEXTSIZE * 8 - 8) / 2));
   oled.print('R');
 }
 
 void drawStatusIcon(char c) {
-  oled.fillRect(STATUS_ICON_X, STATUS_ICON_Y, 6, 8, SH110X_BLACK);
+  oled.fillRect(ox(STATUS_ICON_X), oy(STATUS_ICON_Y), 6, 8, SH110X_BLACK);
   if (!c) return;
   oled.setTextSize(1);
   oled.setTextColor(SH110X_WHITE);
-  oled.setCursor(STATUS_ICON_X, STATUS_ICON_Y);
+  oled.setCursor(ox(STATUS_ICON_X), oy(STATUS_ICON_Y));
   oled.print(c);
+}
+
+// MANUAL_ACTIVE's centre glyph: a real filled triangle rather than a text
+// character — this screen is meant to read at a glance while your thumb is
+// still on the button, so an unmistakable shape beats a 6px '^'/'v'. Idle
+// (no button held) draws a short dash instead of nothing, so the box never
+// looks broken/blank between presses.
+void drawDirectionGlyph(int16_t y, uint8_t direction) {
+  const int16_t cx = kAxleColX + AXLE_LABEL_COL_W / 2;
+  const int16_t cy = y + (GAUGE_TEXTSIZE * 8) / 2;
+  oled.fillRect(kAxleColX, y, AXLE_LABEL_COL_W, GAUGE_TEXTSIZE * 8, SH110X_BLACK);
+  if (direction == AIRLIFT_RAISING) {
+    oled.fillTriangle(cx, cy - 6, cx - 6, cy + 5, cx + 6, cy + 5, SH110X_WHITE);
+  } else if (direction == AIRLIFT_LOWERING) {
+    oled.fillTriangle(cx, cy + 6, cx - 6, cy - 5, cx + 6, cy - 5, SH110X_WHITE);
+  } else {
+    oled.drawFastHLine(cx - 5, cy, 10, SH110X_WHITE);
+  }
 }
 
 // --- gauge diff cache --------------------------------------------------
@@ -101,6 +144,28 @@ char lastTank[6]  = {};
 char lastPreset[16] = {};
 int16_t lastStatusChar = -1;   // not a valid statusChar() return, forces first draw
 bool lastSignalOk = true;
+
+// If it's time to rotate the burn-in offset, do so, clear the panel, and
+// redraw the static axle labels at the new position -- called from update()
+// so it only fires while the gauge (the screen that's actually on all the
+// time) is showing. Also resets `primed`, forcing every value in the rest
+// of update() to repaint at the new offset in the same frame.
+void burnInTick() {
+  const uint32_t now = millis();
+  if (s_burnInLastRotateMs != 0 &&
+      now - s_burnInLastRotateMs < kBurnInRotateMs) {
+    return;
+  }
+  s_burnInLastRotateMs = now;
+  s_burnInIndex = (uint8_t)((s_burnInIndex + 1) % kBurnInOffsetCount);
+  s_offX        = kBurnInOffsets[s_burnInIndex][0];
+  s_offY        = kBurnInOffsets[s_burnInIndex][1];
+  Serial.printf("[OLED] burn-in rotate: index=%u offset=(%d,%d)\n",
+                s_burnInIndex, s_offX, s_offY);
+  oled.clearDisplay();
+  drawAxleLabels();
+  primed = false;
+}
 
 }  // namespace
 
@@ -144,8 +209,16 @@ void begin() {
 
 void setBacklight(uint8_t percent) {
   if (percent > 100) percent = 100;
-  // SH1106 contrast register is 0-0x7F (127), not 0-255.
-  oled.setContrast((uint8_t)((uint16_t)percent * 127 / 100));
+  // SH1106 contrast register is 0-0x7F (127), not 0-255. Confirmed visible
+  // on real hardware via a full-screen min/max flash test -- the change is
+  // subtle on small text/icons, which is why it looked like it did nothing
+  // before that test.
+  const uint8_t contrast = (uint8_t)((uint16_t)percent * 127 / 100);
+  oled.setContrast(contrast);
+}
+
+void setInvert(bool on) {
+  oled.invertDisplay(on);
 }
 
 void splash() {
@@ -169,10 +242,20 @@ void drawStaticLayout() {
   drawAxleLabels();
   oled.display();
   primed = false;   // force every value to paint on the next update()
-  setBacklight(BACKLIGHT_PCT);
+  // Baseline for the burn-in rotation timer (see burnInTick()) -- the panel
+  // was just fully redrawn, so the next rotation is a full kBurnInRotateMs
+  // away rather than firing immediately on the first update() after this.
+  s_burnInLastRotateMs = millis();
+  // Restores the Settings screen's live brightness (menu.cpp), not the
+  // hardcoded default — this also runs every time the menu closes back to
+  // the gauge, and resetting to default there would silently undo a
+  // brightness change the moment you left Settings.
+  setBacklight(menu::currentBacklightPct());
 }
 
 void update(const AirLiftData& d, bool signalOk) {
+  burnInTick();   // may reset `primed`, so this must run before forceAll below
+
   // No dimming here (no colour) — a stale reading is flagged by the status
   // icon alone. Values are still held/shown, same as the other boards, so
   // the driver can see where the car was parked.
@@ -246,17 +329,25 @@ void update(const AirLiftData& d, bool signalOk) {
 namespace {
 
 // --- menu diff cache -----------------------------------------------------
-bool       menuPrimed     = false;
-menu::Mode lastMenuMode   = menu::Mode::GAUGE;
-uint8_t    lastMenuCursor = 0xFF;
-uint8_t    lastMenuCount  = 0xFF;
+bool       menuPrimed      = false;
+menu::Mode lastMenuMode    = menu::Mode::GAUGE;
+uint8_t    lastMenuCursor  = 0xFF;
+uint8_t    lastMenuCount   = 0xFF;
 char       lastMenuItems[8][16] = {};
+char       lastLeftPsi[6]  = {};
+char       lastRightPsi[6] = {};
+uint8_t    lastDirection   = 0xFF;
 
 bool menuViewChanged(const menu::View& v) {
   if (!menuPrimed) return true;
   if (v.mode != lastMenuMode || v.cursor != lastMenuCursor ||
       v.itemCount != lastMenuCount) {
     return true;
+  }
+  if (v.hasLivePressures) {
+    return strcmp(v.leftPsi, lastLeftPsi) != 0 ||
+           strcmp(v.rightPsi, lastRightPsi) != 0 ||
+           v.direction != lastDirection;
   }
   for (uint8_t i = 0; i < v.itemCount; i++) {
     if (strcmp(v.items[i], lastMenuItems[i]) != 0) return true;
@@ -273,6 +364,25 @@ void cacheMenuView(const menu::View& v) {
     strncpy(lastMenuItems[i], v.items[i], sizeof(lastMenuItems[i]) - 1);
     lastMenuItems[i][sizeof(lastMenuItems[i]) - 1] = '\0';
   }
+  strncpy(lastLeftPsi, v.leftPsi, sizeof(lastLeftPsi) - 1);
+  lastLeftPsi[sizeof(lastLeftPsi) - 1] = '\0';
+  strncpy(lastRightPsi, v.rightPsi, sizeof(lastRightPsi) - 1);
+  lastRightPsi[sizeof(lastRightPsi) - 1] = '\0';
+  lastDirection = v.direction;
+}
+
+// FRONT/REAR live control: two big pressure numbers either side of a
+// triangle direction indicator — same visual language as the gauge's F/R
+// rows (drawBigValueHalf/kAxleColX), just with a dynamic glyph instead of a
+// static axle letter, since the title row already names the axle here.
+void drawManualActive(const menu::View& view) {
+  oled.clearDisplay();
+  drawRowCentered(0, view.title, 1);
+  drawBigValueHalf(ROW_FRONT_Y, true, view.leftPsi);
+  drawBigValueHalf(ROW_FRONT_Y, false, view.rightPsi);
+  drawDirectionGlyph(ROW_FRONT_Y, view.direction);
+  drawRowCentered(SCREEN_H - 8, "HOLD +/-", 1);
+  oled.display();
 }
 
 }  // namespace
@@ -280,6 +390,11 @@ void cacheMenuView(const menu::View& v) {
 void drawMenu(const menu::View& view, bool force) {
   if (!force && !menuViewChanged(view)) return;
   cacheMenuView(view);
+
+  if (view.mode == menu::Mode::MANUAL_ACTIVE) {
+    drawManualActive(view);
+    return;
+  }
 
   oled.clearDisplay();
 

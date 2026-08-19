@@ -12,6 +12,12 @@ void begin();
 // car's dip-beam/illumination signal for a night setting.
 void setBacklight(uint8_t percent);
 
+#ifdef BOARD_OLED13
+// SH1106 pixel-swap invert, confirmed visible on real hardware -- OLED13
+// only, exposed as a Settings toggle alongside BACKLIGHT (see menu.cpp).
+void setInvert(bool on);
+#endif
+
 // Boot splash — handle, product name, firmware version — with the backlight
 // faded up over it. Blocks for SPLASH_HOLD_MS. Call between begin() and
 // drawStaticLayout().

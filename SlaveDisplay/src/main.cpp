@@ -85,6 +85,28 @@ void loop() {
   // DEMO_MODE (that flag only fakes pressure telemetry).
   menu::poll();
 
+  // Telemetry ingestion runs unconditionally, whether or not the menu is
+  // open — the MANUAL_ACTIVE screen shows live pressures while you hold
+  // PLUS/MINUS, which needs `data` to actually keep updating in the
+  // background rather than freezing at whatever it was when the menu opened.
+#if DEMO_MODE
+  static uint32_t nextTick = 0;
+  bool gotFreshData = false;
+  if ((int32_t)(millis() - nextTick) >= 0) {
+    nextTick = millis() + DEMO_TICK_MS;
+    demoTick();
+    gotFreshData = true;
+  }
+#else
+  const bool gotFreshData = espnow::take(data);
+  if (gotFreshData) {
+    Serial.printf("[NOW] FL %.1f FR %.1f RL %.1f RR %.1f tank %.1f "
+                  "preset %u status %u\n",
+                  data.fl, data.fr, data.rl, data.rr, data.tank,
+                  data.preset, data.status);
+  }
+#endif
+
   // A GAUGE<->MENU transition means the screen currently holds pixels from
   // whichever mode isn't running any more — force the entered mode to
   // repaint everything rather than trust either side's diff cache.
@@ -92,7 +114,7 @@ void loop() {
   const bool  menuActive    = menu::active();
   if (menuActive != wasMenuActive) {
     if (menuActive) {
-      display::drawMenu(menu::currentView(), true);
+      display::drawMenu(menu::currentView(data), true);
     } else {
       display::drawStaticLayout();   // also resets update()'s diff cache
     }
@@ -100,26 +122,14 @@ void loop() {
   }
 
   if (menuActive) {
-    display::drawMenu(menu::currentView(), false);
+    display::drawMenu(menu::currentView(data), false);
   } else {
-#if DEMO_MODE
-    static uint32_t nextTick = 0;
-    if ((int32_t)(millis() - nextTick) >= 0) {
-      nextTick = millis() + DEMO_TICK_MS;
-      demoTick();
-      display::update(data, true);
-    }
-#else
-    if (espnow::take(data)) {
-      Serial.printf("[NOW] FL %.1f FR %.1f RL %.1f RR %.1f tank %.1f "
-                    "preset %u status %u\n",
-                    data.fl, data.fr, data.rl, data.rr, data.tank,
-                    data.preset, data.status);
-    }
-
     // update() diffs internally, so calling it every pass is cheap — it only
     // touches the panel when a rendered value actually changed (including
     // the link going stale).
+#if DEMO_MODE
+    if (gotFreshData) display::update(data, true);
+#else
     display::update(data, espnow::alive());
 #endif
   }

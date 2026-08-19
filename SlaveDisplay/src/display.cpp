@@ -218,8 +218,11 @@ void drawStaticLayout() {
   primed = false;  // force every value to paint on the next update()
 
   // Belt and braces: begin() leaves the backlight dark, so make sure it is up
-  // even if splash() was skipped.
-  setBacklight(BACKLIGHT_PCT);
+  // even if splash() was skipped. Restores the Settings screen's live
+  // brightness (menu.cpp), not the hardcoded default — this also runs every
+  // time the menu closes back to the gauge, and resetting to default there
+  // would silently undo a brightness change the moment you left Settings.
+  setBacklight(menu::currentBacklightPct());
 }
 
 void update(const AirLiftData& d, bool signalOk) {
@@ -279,18 +282,28 @@ namespace {
 // --- menu diff cache ---------------------------------------------------
 // The menu only redraws on a button press, not a 10 Hz telemetry stream, so
 // (unlike update() above) a whole-screen redraw on every change is cheap
-// enough — no per-row sprite diffing needed.
-bool       menuPrimed    = false;
-menu::Mode lastMenuMode  = menu::Mode::GAUGE;
+// enough — no per-row sprite diffing needed. MANUAL_ACTIVE is the exception:
+// it tracks live pressures instead of items[], since it updates continuously
+// while a button is held rather than only on navigation.
+bool       menuPrimed     = false;
+menu::Mode lastMenuMode   = menu::Mode::GAUGE;
 uint8_t    lastMenuCursor = 0xFF;
 uint8_t    lastMenuCount  = 0xFF;
 char       lastMenuItems[8][16] = {};
+char       lastLeftPsi[6]  = {};
+char       lastRightPsi[6] = {};
+uint8_t    lastDirection   = 0xFF;
 
 bool menuViewChanged(const menu::View& v) {
   if (!menuPrimed) return true;
   if (v.mode != lastMenuMode || v.cursor != lastMenuCursor ||
       v.itemCount != lastMenuCount) {
     return true;
+  }
+  if (v.hasLivePressures) {
+    return strcmp(v.leftPsi, lastLeftPsi) != 0 ||
+           strcmp(v.rightPsi, lastRightPsi) != 0 ||
+           v.direction != lastDirection;
   }
   for (uint8_t i = 0; i < v.itemCount; i++) {
     if (strcmp(v.items[i], lastMenuItems[i]) != 0) return true;
@@ -307,6 +320,47 @@ void cacheMenuView(const menu::View& v) {
     strncpy(lastMenuItems[i], v.items[i], sizeof(lastMenuItems[i]) - 1);
     lastMenuItems[i][sizeof(lastMenuItems[i]) - 1] = '\0';
   }
+  strncpy(lastLeftPsi, v.leftPsi, sizeof(lastLeftPsi) - 1);
+  lastLeftPsi[sizeof(lastLeftPsi) - 1] = '\0';
+  strncpy(lastRightPsi, v.rightPsi, sizeof(lastRightPsi) - 1);
+  lastRightPsi[sizeof(lastRightPsi) - 1] = '\0';
+  lastDirection = v.direction;
+}
+
+// FRONT/REAR live control: two big pressure numbers either side of a
+// direction triangle, colour-coded (green raising / amber lowering / grey
+// idle) the same way the gauge's status bar already colour-codes — the one
+// thing this board can do for "fancy" that the monochrome OLED can't.
+void drawManualActive(const menu::View& view) {
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_PRESET, COL_BG);
+  tft.drawString(view.title, GRID_X0 + GRID_W / 2, GRID_Y0 + 16, 4);
+
+  const uint16_t valueColour = (view.direction == AIRLIFT_RAISING)  ? COL_RAISING
+                              : (view.direction == AIRLIFT_LOWERING) ? COL_LOWERING
+                                                                       : COL_LABEL;
+
+  const int16_t top    = GRID_Y0 + 36;
+  const int16_t bottom = STATUS_Y + STATUS_H;
+  const int16_t midY   = (top + bottom) / 2;
+
+  tft.setTextColor(valueColour, COL_BG);
+  tft.drawString(view.leftPsi, GRID_X0 + CELL_W / 2, midY, VALUE_FONT_CORNER);
+  tft.drawString(view.rightPsi, GRID_X0 + CELL_W + CELL_W / 2, midY, VALUE_FONT_CORNER);
+
+  const int16_t cx    = GRID_X0 + CELL_W;
+  const int16_t triH  = 10;
+  if (view.direction == AIRLIFT_RAISING) {
+    tft.fillTriangle(cx, midY - triH, cx - triH, midY + triH, cx + triH, midY + triH, COL_RAISING);
+  } else if (view.direction == AIRLIFT_LOWERING) {
+    tft.fillTriangle(cx, midY + triH, cx - triH, midY - triH, cx + triH, midY - triH, COL_LOWERING);
+  } else {
+    tft.drawFastHLine(cx - triH, midY, triH * 2, COL_LABEL);
+  }
+
+  tft.setTextColor(COL_LABEL, COL_BG);
+  tft.drawString("HOLD +/-", GRID_X0 + GRID_W / 2, bottom - 12, 2);
 }
 
 }  // namespace
@@ -314,6 +368,11 @@ void cacheMenuView(const menu::View& v) {
 void drawMenu(const menu::View& view, bool force) {
   if (!force && !menuViewChanged(view)) return;
   cacheMenuView(view);
+
+  if (view.mode == menu::Mode::MANUAL_ACTIVE) {
+    drawManualActive(view);
+    return;
+  }
 
   tft.fillScreen(COL_BG);
   tft.setTextDatum(MC_DATUM);
