@@ -135,3 +135,27 @@ Each line is one decoded message:
 
 Once this confirms clean, consistent decodes for the buttons you care about,
 that's your green light to design the real input stage into a PCB.
+
+## Slave Display menu test (no master hardware needed)
+
+This rig also broadcasts decoded button state to the AirLift V2 Slave
+Display over ESP-NOW (`AirLiftButtons` — same struct the real master will
+eventually send from `PlatformIO/src/espnow_tx.cpp`), so you can exercise
+the display's on-screen menu (see `SlaveDisplay/README.md` → "MFL menu")
+before wiring the actual AirLift controller.
+
+- The channel is fixed at boot (`kEspNowChannel`, default `1`) — it must
+  match the display's `ESPNOW_WIFI_CHANNEL` build flag or the menu will just
+  never respond, with no other symptom.
+- Only exactly-one-button decodes are ever sent (same rule
+  `PlatformIO/src/mfl.cpp` applies) — an ambiguous/corrupted frame is
+  broadcast as idle rather than as two buttons held at once. The raw
+  `ON=/IO=/PLUS=/MINUS=` debug line printed here is unfiltered, so it can
+  still show you a corrupted read even when nothing goes out over ESP-NOW
+  for it.
+- With no display listening, this all still runs — `esp_now_send()` failures
+  aren't checked, so nothing here will complain, it just no-ops.
+- The Slave Display never talks back for a menu preset-select in this setup
+  (that needs the real master to receive `AirLiftCommand`) — you can drive
+  the menu and watch it navigate, but "select preset" won't do anything
+  downstream yet.

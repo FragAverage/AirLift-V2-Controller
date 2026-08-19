@@ -23,8 +23,16 @@
 //
 // Wiring: see README.md in this folder for the input-protection circuit.
 // Do NOT connect the car wire straight to the ESP32 pin.
+//
+// Also broadcasts decoded button state to the AirLift V2 Slave Display over
+// ESP-NOW (AirLiftButtons, see ../../PlatformIO/include/airlift_espnow.h) —
+// lets you exercise the Slave Display's on-screen menu from this bench rig
+// before the real AirLift master hardware is wired up. See "ESP-NOW" below.
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
 
 // Wired to D18 on the bench build — a plain digital GPIO, fine as an input
 // here since nothing else on the board claims it in this sketch.
@@ -40,6 +48,38 @@ constexpr uint32_t kBitThresholdUs   = 250;   // 0 vs 1 discriminator
 constexpr uint32_t kFrameGapUs       = 5000;  // idle gap => new message
 constexpr uint8_t  kPulsesPerMessage = 8;
 constexpr uint8_t  kConfirmFrames    = 2;     // consecutive matching frames before we trust a change
+
+// ---------------------------------------------------------------------------
+// ESP-NOW: broadcast AirLiftButtons to the Slave Display.
+//
+// *** This struct/enum must stay byte-identical to (and in sync with):
+//       PlatformIO/include/airlift_espnow.h
+//       SlaveDisplay/include/airlift_espnow.h
+// *** Same reasoning as those two files: only the length is sanity-checked
+// on the receiving end, not the field layout, so a mismatch here silently
+// produces garbage on the display rather than a build error.
+// ---------------------------------------------------------------------------
+typedef struct {
+  uint8_t buttons;  // bit0=PLUS bit1=MINUS bit2=SET bit3=IO; 0 = idle/invalid
+  uint8_t seq;      // free-running, purely diagnostic
+} AirLiftButtons;
+static_assert(sizeof(AirLiftButtons) == 2, "keep in sync with airlift_espnow.h");
+
+enum : uint8_t {
+  MFL_BIT_PLUS  = 0x01,
+  MFL_BIT_MINUS = 0x02,
+  MFL_BIT_SET   = 0x04,
+  MFL_BIT_IO    = 0x08,
+};
+
+// Must match the Slave Display's ESPNOW_WIFI_CHANNEL build flag (default 1 —
+// see SlaveDisplay/platformio.ini) and, once you have it, the real master's
+// kEspNowChannel. Mismatch = the display sits on NO SIGNAL / the menu never
+// responds, no other symptom.
+constexpr uint8_t kEspNowChannel = 1;
+constexpr uint32_t kButtonSendPeriodMs = 50;   // ~20 Hz, matches espnow_tx.cpp
+
+const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -122,12 +162,66 @@ static ButtonState decode(const uint32_t widths[kPulsesPerMessage])
   return s;
 }
 
+// Debounced state, shared between the raw-frame processing block (which sets
+// it) and the ESP-NOW send block (which reads it) — hoisted to file scope
+// since the two run on independent schedules (frame-driven vs. time-driven).
+static ButtonState lastConfirmed;
+
+// Bitmask for the wire, applying the same "only trust exactly one flag"
+// filter the real master (PlatformIO/src/mfl.cpp) applies — a corrupted or
+// ambiguous decode is reported as idle rather than as (incorrectly) two
+// buttons held at once. Note pazi88's `on` mask is this wheel's physical
+// "SET" button — see MFL-FINDINGS.md's button-mapping table.
+uint8_t buttonsToBitmask(const ButtonState& s)
+{
+  const uint8_t count = (uint8_t)s.on + s.io + s.plus + s.minus;
+  if (count != 1) return 0;
+
+  uint8_t mask = 0;
+  if (s.plus)  mask |= MFL_BIT_PLUS;
+  if (s.minus) mask |= MFL_BIT_MINUS;
+  if (s.on)    mask |= MFL_BIT_SET;
+  if (s.io)    mask |= MFL_BIT_IO;
+  return mask;
+}
+
+void espnowInit()
+{
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(false, false);
+
+  // Same "pin the channel without ever associating" trick the Slave Display
+  // itself uses (SlaveDisplay/src/espnow_link.cpp) — nothing here ever joins
+  // an AP, so the channel has to be forced explicitly.
+  esp_wifi_set_promiscuous(true);
+  esp_wifi_set_channel(kEspNowChannel, WIFI_SECOND_CHAN_NONE);
+  esp_wifi_set_promiscuous(false);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[NOW] esp_now_init() FAILED — button broadcast disabled");
+    return;
+  }
+
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, kBroadcastMac, sizeof(kBroadcastMac));
+  peer.channel = 0;   // "whatever channel we're already parked on"
+  peer.ifidx   = WIFI_IF_STA;
+  peer.encrypt = false;
+  if (esp_now_add_peer(&peer) != ESP_OK) {
+    Serial.println("[NOW] add_peer FAILED — button broadcast disabled");
+    return;
+  }
+
+  Serial.printf("[NOW] broadcasting AirLiftButtons on channel %u\r\n", kEspNowChannel);
+}
+
 void setup()
 {
   Serial.begin(115200);
   delay(200);
   pinMode(kMflPin, INPUT);
   attachInterrupt(digitalPinToInterrupt(kMflPin), mflIsr, CHANGE);
+  espnowInit();
   Serial.println();
   Serial.println("MFL sniffer up. Waiting for frames on GPIO " + String(kMflPin) + "...");
   Serial.println("Columns: raw pulse widths (us) x8  |  decoded value  |  buttons");
@@ -144,6 +238,21 @@ void loop()
   if (millis() - lastLevelPrintMs >= 300) {
     lastLevelPrintMs = millis();
     Serial.printf("[pin check] GPIO%d raw level = %s\r\n", kMflPin, digitalRead(kMflPin) == HIGH ? "HIGH" : "LOW");
+  }
+
+  // Broadcast current (debounced) button state at ~20 Hz, independent of
+  // whether a fresh raw frame arrived this pass — mirrors espnow_tx.cpp on
+  // the real master, and means a dropped Wi-Fi packet just gets caught up by
+  // the next one instead of losing a button press outright.
+  static uint32_t lastButtonSendMs = 0;
+  static uint8_t  buttonSeq        = 0;
+  const uint32_t  nowMs            = millis();
+  if (nowMs - lastButtonSendMs >= kButtonSendPeriodMs) {
+    lastButtonSendMs = nowMs;
+    AirLiftButtons b = {};
+    b.buttons = buttonsToBitmask(lastConfirmed);
+    b.seq     = buttonSeq++;
+    esp_now_send(kBroadcastMac, (const uint8_t*)&b, sizeof(b));
   }
 
   if (!s_frameReady) return;
@@ -163,7 +272,6 @@ void loop()
 
   const ButtonState decoded = decode(widths);
 
-  static ButtonState lastConfirmed;
   static ButtonState pending;
   static uint8_t matchCount = 0;
 
