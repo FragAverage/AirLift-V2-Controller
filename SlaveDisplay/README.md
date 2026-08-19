@@ -1,6 +1,7 @@
 # AirLift V2 — Slave Display
 
-Receive-only dashboard for the AirLift V2 MITM controller. Three boards share
+Gauge-cluster dashboard for the AirLift V2 MITM controller, with an
+MFL-button-driven on-screen menu (see "MFL menu" below). Four boards share
 this firmware as separate PlatformIO envs:
 
 - **`cyd`** (default) — **ESP32-2432S028R** ("Cheap Yellow Display"): 2.8"
@@ -11,10 +12,17 @@ this firmware as separate PlatformIO envs:
   round panel driven over the ESP32-S3's RGB-parallel LCD peripheral (not
   SPI) + CST820 capacitive touch, both gated through a TCA9554 I2C IO
   expander. Arduino_GFX — see "The round21 board" below for why.
+- **`oled13`** — generic ESP32-S3 devkit + 1.3" SH1106 128×64 monochrome
+  OLED, I2C. The intended **production screen size** — no touch hardware at
+  all, every input is the MFL menu. Adafruit_SH110X — see "The oled13 board"
+  below.
 
-The master broadcasts an `AirLiftData` packet over ESP-NOW; the unit renders
-it. It never transmits, never pairs, and holds no state beyond the last
-packet.
+The master broadcasts `AirLiftData` (pressures/preset/status) and
+`AirLiftButtons` (live MFL button state) over ESP-NOW; the unit renders them
+and holds no state beyond the last packet of each. It also broadcasts back —
+`AirLiftCommand`, only when the on-screen menu confirms an action — but
+still needs no pairing and no knowledge of the master's MAC either
+direction, same broadcast model throughout.
 
 `display.cpp`/`touch.cpp` are identical between `cyd` and `round128` — every
 pixel position, font size, and pin comes from `include/config.h`, gated on
@@ -55,6 +63,7 @@ they're running on.
 pio run                       # build the default env (cyd)
 pio run -e round128           # build the 1.28" round panel
 pio run -e round21            # build the 2.1" round panel
+pio run -e oled13             # build the 1.3" OLED (production size)
 pio run -e round128 -t upload # flash over USB
 pio device monitor -e round128 --baud 115200
 ```
@@ -185,9 +194,50 @@ into it is just a RAM store with no transfer-time flicker to hide. The
 diffed-redraw cache (skip repainting a box whose text didn't change) is kept
 anyway, purely to save CPU at the ~10 Hz update rate.
 
+## The oled13 board (`oled13`)
+
+Generic ESP32-S3 devkit + 1.3" SH1106 128×64 monochrome OLED, I2C — the
+**intended production screen size**, unlike the other three boards which are
+all off-the-shelf dev-board bring-up rigs. No touch hardware exists on this
+board at all (`touch_oled13.cpp` is an unconditional stub); every input is
+the MFL menu instead.
+
+Wiring is whatever you actually used — this is a bare devkit + a separate
+OLED breakout, not a fixed-pinout product like the other three boards, so
+`config.h`'s `I2C_SDA_PIN`/`I2C_SCL_PIN`/`OLED_I2C_ADDR` under `BOARD_OLED13`
+need to match your build. `display_oled13.cpp`'s `begin()` tries both common
+addresses (0x3C, 0x3D) and, if neither ACKs, scans the whole I2C bus and logs
+what it finds — check the serial log first if the screen stays blank.
+
+**Layout is a genuine redesign, not a shrunk version of the other boards'
+2x2 grid** — 128×64 monochrome is a different enough form factor (no colour,
+a fraction of the pixel budget) that it gets its own compact layout:
+
+- Corner pressures are the primary readout, big (`GAUGE_TEXTSIZE` 2, 16px),
+  arranged as two rows — "F" (front: FL left, FR right) and "R" (rear: RL
+  left, RR right) — with a narrow single-letter axle label instead of a
+  `FL:`/`FR:` prefix, which wouldn't fit at this size. Same left/right =
+  driver/passenger-side convention the other boards' 2x2 grid uses.
+- Status has no room for its own text row here, so it's a single glyph in
+  the top-right corner instead — `^`/`v` for raising/lowering, `X` for no
+  signal, nothing drawn for idle (a blank icon reads as "no data" more than
+  "nothing wrong"). See `STATUS_CHAR_*` in `config.h`.
+- Tank and preset get their own small rows lower on the screen, freed up by
+  moving status out of a full row.
+- The MFL menu's 8-item Presets list can't fit in one screen at this
+  resolution (title + 3 rows is already the full 64px height), so
+  `drawMenu()` scrolls a `MENU_VISIBLE_ROWS`-tall window that keeps the
+  cursor centred, with a "N/total" hint in the title row — see `config.h`'s
+  `MENU_VISIBLE_ROWS` comment.
+
+No PSRAM needed (the whole SH1106 framebuffer is 128×64/8 = 1KB), so unlike
+`round21` this env doesn't touch `qio_opi`/PSRAM config at all — just the
+same native-USB `ARDUINO_USB_CDC_ON_BOOT` requirement `round21` has (see that
+section above).
+
 ## Wi-Fi channel
 
-Applies to all three boards. ESP-NOW only works between radios parked on the
+Applies to all four boards. ESP-NOW only works between radios parked on the
 same channel, and this end never associates with anything, so the channel is
 pinned explicitly at boot. If the
 master is running its SoftAP (web UI) on a channel other than 1, set
@@ -226,6 +276,43 @@ The master pins its soft-AP to channel 1 (`kEspNowChannel`) to match this end's
 `ESPNOW_WIFI_CHANNEL`, and holds its radio up while the ignition is on so the
 display does not go blank when its power-saving would otherwise drop Wi-Fi.
 
+## MFL menu
+
+The steering wheel's MFL cruise-control buttons are wired into the **master**
+(GPIO34, opto-isolated — see `MFL-FINDINGS.md`), not this display. To let
+those buttons drive an on-screen menu here, ESP-NOW is bidirectional between
+the two ends for the first time:
+
+- **Master → slave**, `AirLiftButtons` (`airlift_espnow.h`): live button
+  *state* (not press/release events), broadcast at ~20 Hz — faster than the
+  10 Hz `AirLiftData` telemetry, so menu navigation feels responsive.
+  State rather than events matters here: ESP-NOW broadcast has no delivery
+  guarantee, so a lost state frame just gets caught up by the next one,
+  where a lost discrete "button pressed" event would be a permanently
+  missed input. `menu.cpp` does its own rising-edge detection by diffing
+  each new frame against the last one it saw.
+- **Slave → master**, `AirLiftCommand`: sent once, when the menu confirms an
+  action (currently only `CMD_SELECT_PRESET`). Same broadcast/unencrypted/
+  no-pairing trust model as everything else this firmware sends or
+  receives — the master can only be told to select from its own
+  pre-configured preset table, never handed an arbitrary pressure target.
+
+**Mapping** (`menu.cpp`): `IO` = enter the menu / select the highlighted
+item, `PLUS`/`MINUS` = move the cursor up/down, `SET`/`ON` = back one level
+(and back out of the top level returns to the gauge view). Two top-level
+screens: **Presets** (select one — sends `CMD_SELECT_PRESET` and returns to
+the gauge) and **Settings** (currently just backlight, adjusted live via
+`display::setBacklight()`; not persisted — resets to `BACKLIGHT_PCT` on
+reboot).
+
+The menu is rendered by the same per-board `display::drawMenu()` each env
+already has for the gauge (`display.cpp` for `cyd`/`round128`,
+`display_round21.cpp` for `round21`) — board-agnostic `menu.cpp` only ever
+deals in a `menu::View` (title + item list + cursor), never a pixel. Redraws
+are whole-screen rather than diffed per element (unlike the gauge's
+`update()`): the menu only changes on a button press, not a 10 Hz stream, so
+there's no meaningful SPI/redraw cost to save by diffing it.
+
 ## Behaviour
 
 - **Redraw is diffed, not cleared.** `drawStaticLayout()` paints the dividers and
@@ -241,12 +328,15 @@ display does not go blank when its power-saving would otherwise drop Wi-Fi.
 
 ## Touch (`ENABLE_TOUCH=1`)
 
-Tap-zone logic is the same shape on every board (`dispatch()`, in whichever
-`touch*.cpp` the env compiles): the four corner quadrants, and preset down /
-preset up on the left / right of the tank-preset strip, driven by that env's
-`GRID_X0/Y0`/`CELL_W`/`CELL_H` geometry. Each hit currently just does a
-`Serial.printf` — the actual command injection is master-side work still to
-be wired up. The three boards' raw-read front ends differ:
+Applies to `cyd`/`round128`/`round21` only — `oled13` has no touch hardware
+at all, `touch_oled13.cpp` is an unconditional stub, and every input on that
+board is the MFL menu instead. Tap-zone logic is the same shape on the other
+three boards (`dispatch()`, in whichever `touch*.cpp` the env compiles): the
+four corner quadrants, and preset down / preset up on the left / right of
+the tank-preset strip, driven by that env's `GRID_X0/Y0`/`CELL_W`/`CELL_H`
+geometry. Each hit currently just does a `Serial.printf` — the actual
+command injection is master-side work still to be wired up. Their raw-read
+front ends differ:
 
 - **`cyd`** — XPT2046 resistive, its own SPI bus. Calibrated for raw X/Y
   200–3900, remapped to landscape with the axes swapped and Y mirrored in
@@ -266,16 +356,19 @@ be wired up. The three boards' raw-read front ends differ:
 
 | File | Contents |
 | --- | --- |
-| `include/config.h` | Per-board pins + layout geometry (`DISPLAY_ROUND`/`BOARD_ROUND21`-gated), colours, timeouts |
-| `include/airlift_espnow.h` | The shared wire struct — **keep in sync with the master** |
-| `src/espnow_link.cpp` | STA mode, fixed channel, receive callback, staleness — shared, board-agnostic |
-| `src/display.cpp` | `cyd`/`round128` (TFT_eSPI): static layout + diffed value rendering, driven entirely by `config.h` |
+| `include/config.h` | Per-board pins + layout geometry (`DISPLAY_ROUND`/`BOARD_ROUND21`/`BOARD_OLED13`-gated), colours, timeouts |
+| `include/airlift_espnow.h` | The shared wire structs (`AirLiftData`, `AirLiftButtons`, `AirLiftCommand`) — **keep in sync with the master** |
+| `src/espnow_link.cpp` | STA mode, fixed channel, receive callback (`AirLiftData` + `AirLiftButtons`), `sendCommand()` — shared, board-agnostic |
+| `include/menu.h` / `src/menu.cpp` | MFL-button-driven menu state machine (edge detection, screens, cursor) — shared, board-agnostic, rendering-agnostic |
+| `src/display.cpp` | `cyd`/`round128` (TFT_eSPI): static layout + diffed value rendering + `drawMenu()`, driven entirely by `config.h` |
 | `src/touch.cpp` | `cyd`/`round128`: tap-zone dispatch; XPT2046 (CYD, VSPI) or CST816T (round128, I2C) front end |
-| `src/display_round21.cpp` | `round21` (Arduino_GFX): ST7701 init, RGB panel bring-up, `Arduino_ST7701` GFX subclass, layout + diffed rendering |
+| `src/display_round21.cpp` | `round21` (Arduino_GFX): ST7701 init, RGB panel bring-up, `Arduino_ST7701` GFX subclass, layout + diffed rendering + `drawMenu()` |
 | `src/touch_round21.cpp` | `round21`: tap-zone dispatch + CST820 front end |
 | `src/tca9554.cpp` | `round21`: TCA9554 I2C IO-expander driver (panel reset/CS/power, touch reset) |
-| `src/main.cpp` | Boot, loop, preset names — shared, board-agnostic |
+| `src/display_oled13.cpp` | `oled13` (Adafruit_SH110X): I2C bring-up (with address fallback + bus scan on failure), compact big-value layout + `drawMenu()` |
+| `src/touch_oled13.cpp` | `oled13`: unconditional no-op stub — no touch hardware on this board |
+| `src/main.cpp` | Boot, loop (menu vs. gauge branch), preset names — shared, board-agnostic |
 
 Each env's `build_src_filter` in `platformio.ini` picks the right pair of
-`display*`/`touch*` files and excludes `tca9554.cpp` on the two boards that
+`display*`/`touch*` files and excludes `tca9554.cpp` on the boards that
 don't have one.

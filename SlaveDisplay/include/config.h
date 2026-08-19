@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Three boards share this firmware:
+// Four boards share this firmware:
 //
 //   - ESP32-2432S028R "Cheap Yellow Display" (default) — ILI9341 320x240
 //     landscape + XPT2046 resistive touch on its own SPI bus. Rendered with
@@ -17,12 +17,18 @@
 //     expander, CST820 capacitive touch on I2C. TFT_eSPI has no working
 //     ST7701-RGB support, so this board uses Arduino_GFX instead and gets its
 //     own implementation: src/display_round21.cpp, src/touch_round21.cpp,
-//     src/tca9554.cpp. platformio.ini's build_src_filter keeps each env
-//     compiling only its own display/touch files.
+//     src/tca9554.cpp.
+//   - Generic ESP32-S3 devkit + 1.3" SH1106 128x64 monochrome OLED, I2C
+//     (build flag BOARD_OLED13=1) — the intended production screen size.
+//     Adafruit_SH110X, own implementation: src/display_oled13.cpp,
+//     src/touch_oled13.cpp (this board has no touch hardware at all, so
+//     that file is just a stub). No backlight — "brightness" maps to the
+//     SH1106's contrast register instead of PWM.
 //
-// Panel SPI pins for the two TFT_eSPI boards live in platformio.ini as
-// TFT_eSPI build flags. Everything else board-specific — touch pins, panel
-// pins/timing for round21, and layout geometry — lives here.
+// platformio.ini's build_src_filter keeps each env compiling only its own
+// display/touch files. Panel SPI pins for the two TFT_eSPI boards live in
+// platformio.ini as TFT_eSPI build flags. Everything else board-specific —
+// touch pins, panel pins/timing, I2C pins, and layout geometry — lives here.
 // ---------------------------------------------------------------------------
 
 #if defined(DISPLAY_ROUND)
@@ -79,6 +85,21 @@
 // Ignore repeat taps inside this window.
 #define TP_DEBOUNCE_MS 250
 
+#elif defined(BOARD_OLED13)
+
+// No touch hardware on this board at all — every button input comes from
+// the MFL menu instead (see menu.h). touch_oled13.cpp is a stub; nothing
+// here actually needs TP_DEBOUNCE_MS, kept only so config.h's shape doesn't
+// surprise a reader expecting every board branch to define it.
+#define TP_DEBOUNCE_MS 250
+
+// --- I2C bus (OLED only — no other I2C device on this board) ---------------
+#define I2C_SDA_PIN 16
+#define I2C_SCL_PIN 17
+#define OLED_I2C_ADDR 0x3C   // 0x3D on genuine Adafruit modules; 0x3C on most
+                             // generic/eBay SH1106 breakouts — check yours if
+                             // the screen stays blank with no I2C errors.
+
 #else  // CYD
 
 // --- Touch (XPT2046 on VSPI, separate bus from the panel) ------------------
@@ -95,7 +116,7 @@
 // Ignore repeat taps inside this window.
 #define TP_DEBOUNCE_MS 250
 
-#endif  // DISPLAY_ROUND / BOARD_ROUND21
+#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13
 
 // --- Serial ----------------------------------------------------------------
 #define SERIAL_BAUD 115200
@@ -221,6 +242,56 @@
 #define SPLASH_Y_PRODUCT       272
 #define SPLASH_Y_VERSION       312
 
+#elif defined(BOARD_OLED13)
+
+// 128x64 monochrome, no colour, a fraction of the other boards' pixel
+// budget — this is a genuinely different, tighter layout (a mini 2x2-style
+// grid in text, not the full boxed grid the other three boards share). No
+// GRID_X0/CELL_W-style constants here since there's no grid.
+#define SCREEN_W 128
+#define SCREEN_H 64
+
+// Corner pressures are the primary readout, so they get the big font
+// (size-2, 16px tall) — big enough that a "FL:" style label wouldn't fit
+// alongside the value, so a single-letter axle label (F/R) sits in a
+// narrow left column instead, drawn once in drawStaticLayout() (it never
+// changes), with the two values of that axle split across the rest of the
+// width — same left/right = driver/passenger-side spatial convention the
+// other three boards' 2x2 grid uses, just without the box round it.
+#define GAUGE_TEXTSIZE     2
+#define AXLE_LABEL_X       2
+#define AXLE_LABEL_COL_W   12   // reserved width before the two big values
+#define ROW_FRONT_Y        10   // F: big FL | big FR
+#define ROW_REAR_Y         28   // R: big RL | big RR
+
+// Status used to be its own text row; now it's a single glyph in the top
+// right, out of the corner-values' way, so the freed space goes to the
+// bigger corner text and to tank/preset (moved lower, each its own row).
+// No dedicated "no data yet" glyph — nothing to draw beats a stale-looking
+// blank icon.
+#define STATUS_ICON_Y      0
+#define STATUS_ICON_X      (SCREEN_W - 6)   // one 6px-wide char, size 1
+#define STATUS_CHAR_RAISING  '^'
+#define STATUS_CHAR_LOWERING 'v'
+#define STATUS_CHAR_NOSIGNAL 'X'
+
+#define ROW_TANK_Y         46
+#define ROW_PRESET_Y       56
+
+// Menu: title row + up to 3 item rows (title + 3*16 = 64, exactly the
+// screen height) — an 8-item Presets list can't all fit at once here, so
+// display_oled13.cpp's drawMenu() scrolls a 3-row window that keeps the
+// cursor centred, rather than trying to shrink text further.
+#define MENU_TEXTSIZE     1
+#define MENU_TITLE_Y      0
+#define MENU_ITEMS_Y      16
+#define MENU_ROW_H        16
+#define MENU_VISIBLE_ROWS 3
+
+#define SPLASH_Y_HANDLE   16
+#define SPLASH_Y_PRODUCT  32
+#define SPLASH_Y_VERSION  48
+
 #else  // CYD
 
 #define TFT_ROTATION 1  // landscape, 320x240
@@ -257,7 +328,7 @@
 #define SPLASH_Y_PRODUCT      156
 #define SPLASH_Y_VERSION      186
 
-#endif  // DISPLAY_ROUND / BOARD_ROUND21
+#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13 (see the OLED branch above)
 
 // --- Splash ------------------------------------------------------------
 #define SPLASH_HANDLE   "@jd_drift"
