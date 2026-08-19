@@ -18,7 +18,9 @@ TFT_eSPI tft = TFT_eSPI();
 // overwritten by the new one in a single SPI burst — no intermediate state.
 //
 // Allocated once at boot and reused, so nothing churns the heap at runtime.
-// 16bpp: 156x58 = 18.1k, 156x28 = 8.7k, 320x22 = 14.1k -> ~41k total.
+// Sizes come from config.h (CELL_W/CELL_VALUE_H etc.) and differ per board —
+// CYD 16bpp: 156x58 + 156x28 + 320x22 -> ~41k; round: 72x28 + 72x22 + 152x22
+// -> ~11k.
 // ---------------------------------------------------------------------------
 TFT_eSprite sprCorner = TFT_eSprite(&tft);
 TFT_eSprite sprStrip  = TFT_eSprite(&tft);
@@ -33,11 +35,14 @@ struct Cell {
 };
 
 // Index order matches the diff cache below: FL, FR, RL, RR.
+// Offsets by (GRID_X0, GRID_Y0) so the grid can be inset from the framebuffer
+// origin — 0 on the CYD (edge-to-edge), non-zero on the round panel (inset to
+// clear the circular bezel; see config.h).
 const Cell kCells[4] = {
-  {"FL", 0,      0},
-  {"FR", CELL_W, 0},
-  {"RL", 0,      CELL_H},
-  {"RR", CELL_W, CELL_H},
+  {"FL", GRID_X0,          GRID_Y0},
+  {"FR", GRID_X0 + CELL_W, GRID_Y0},
+  {"RL", GRID_X0,          GRID_Y0 + CELL_H},
+  {"RR", GRID_X0 + CELL_W, GRID_Y0 + CELL_H},
 };
 
 // --- diff cache ------------------------------------------------------------
@@ -97,7 +102,7 @@ bool createSprites() {
   const bool ok =
       sprCorner.createSprite(CELL_W - 4, CELL_VALUE_H) != nullptr &&
       sprStrip.createSprite(CELL_W - 4, STRIP_VALUE_H) != nullptr &&
-      sprStatus.createSprite(SCREEN_W, STATUS_H) != nullptr;
+      sprStatus.createSprite(GRID_W, STATUS_H) != nullptr;
 
   if (!ok) {
     sprCorner.deleteSprite();
@@ -116,7 +121,7 @@ void begin() {
   setBacklight(0);
 
   tft.init();
-  tft.setRotation(1);  // landscape, 320x240
+  tft.setRotation(TFT_ROTATION);
   tft.fillScreen(COL_BG);
   tft.setTextDatum(TL_DATUM);
 
@@ -160,19 +165,19 @@ void splash() {
   tft.fillScreen(COL_BG);
   tft.setTextDatum(MC_DATUM);
 
-  // Font 6 is digits-only, so the handle uses Font 4 at double size (52px).
   tft.setTextColor(COL_VALUE, COL_BG);
-  tft.setTextSize(2);
-  tft.drawString(SPLASH_HANDLE, SCREEN_W / 2, 96, 4);
+  tft.setTextSize(SPLASH_HANDLE_SIZE);
+  tft.drawString(SPLASH_HANDLE, SCREEN_W / 2, SPLASH_Y_HANDLE, SPLASH_HANDLE_FONT);
   tft.setTextSize(1);
 
-  tft.drawFastHLine(SCREEN_W / 2 - 70, 132, 140, COL_DIVIDER);
+  tft.drawFastHLine(SCREEN_W / 2 - SPLASH_RULE_HALFLEN, SPLASH_Y_RULE,
+                     SPLASH_RULE_HALFLEN * 2, COL_DIVIDER);
 
   tft.setTextColor(COL_PRESET, COL_BG);
-  tft.drawString("AIRLIFT V2", SCREEN_W / 2, 156, 4);
+  tft.drawString("AIRLIFT V2", SCREEN_W / 2, SPLASH_Y_PRODUCT, 4);
 
   tft.setTextColor(COL_LABEL, COL_BG);
-  tft.drawString(SLAVE_FW_VERSION, SCREEN_W / 2, 186, 2);
+  tft.drawString(SLAVE_FW_VERSION, SCREEN_W / 2, SPLASH_Y_VERSION, 2);
 
   // Fade up rather than snapping on — the panel is already painted, so this
   // reveals the splash instead of flashing the driver.
@@ -189,13 +194,13 @@ void drawStaticLayout() {
   tft.fillScreen(COL_BG);
 
   // 2x2 grid rules
-  tft.drawFastVLine(CELL_W - 1, 0, GRID_H, COL_DIVIDER);
-  tft.drawFastHLine(0, CELL_H - 1, SCREEN_W, COL_DIVIDER);
+  tft.drawFastVLine(GRID_X0 + CELL_W - 1, GRID_Y0, GRID_H, COL_DIVIDER);
+  tft.drawFastHLine(GRID_X0, GRID_Y0 + CELL_H - 1, GRID_W, COL_DIVIDER);
 
   // strip + status bar rules
-  tft.drawFastHLine(0, STRIP_Y - 1, SCREEN_W, COL_DIVIDER);
-  tft.drawFastVLine(CELL_W - 1, STRIP_Y, STRIP_H, COL_DIVIDER);
-  tft.drawFastHLine(0, STATUS_Y - 1, SCREEN_W, COL_DIVIDER);
+  tft.drawFastHLine(GRID_X0, STRIP_Y - 1, GRID_W, COL_DIVIDER);
+  tft.drawFastVLine(GRID_X0 + CELL_W - 1, STRIP_Y, STRIP_H, COL_DIVIDER);
+  tft.drawFastHLine(GRID_X0, STATUS_Y - 1, GRID_W, COL_DIVIDER);
 
   // corner captions
   tft.setTextDatum(TL_DATUM);
@@ -206,9 +211,9 @@ void drawStaticLayout() {
 
   // tank + preset captions
   tft.setTextColor(COL_TANK, COL_BG);
-  tft.drawString("TANK", 6, STRIP_Y + 4, 2);
+  tft.drawString("TANK", GRID_X0 + 6, STRIP_Y + 4, 2);
   tft.setTextColor(COL_PRESET, COL_BG);
-  tft.drawString("PRESET", CELL_W + 6, STRIP_Y + 4, 2);
+  tft.drawString("PRESET", GRID_X0 + CELL_W + 6, STRIP_Y + 4, 2);
 
   primed = false;  // force every value to paint on the next update()
 
@@ -230,7 +235,7 @@ void update(const AirLiftData& d, bool signalOk) {
     formatPsi(corners[i], buf, sizeof(buf));
     if (forceAll || strcmp(buf, lastCorner[i]) != 0) {
       drawValue(sprCorner, kCells[i].x + 2, kCells[i].y + CELL_VALUE_TOP,
-                CELL_W - 4, CELL_VALUE_H, buf, valueColour, 6);
+                CELL_W - 4, CELL_VALUE_H, buf, valueColour, VALUE_FONT_CORNER);
       strncpy(lastCorner[i], buf, sizeof(lastCorner[i]) - 1);
       lastCorner[i][sizeof(lastCorner[i]) - 1] = '\0';
     }
@@ -241,16 +246,17 @@ void update(const AirLiftData& d, bool signalOk) {
   if (forceAll || strcmp(tank, lastTank) != 0) {
     char withUnit[12];
     snprintf(withUnit, sizeof(withUnit), "%s PSI", tank);
-    drawValue(sprStrip, 2, STRIP_VALUE_TOP, CELL_W - 4, STRIP_VALUE_H,
-              withUnit, tankColour, 4);
+    drawValue(sprStrip, GRID_X0 + 2, STRIP_VALUE_TOP, CELL_W - 4, STRIP_VALUE_H,
+              withUnit, tankColour, VALUE_FONT_STRIP);
     strncpy(lastTank, tank, sizeof(lastTank) - 1);
     lastTank[sizeof(lastTank) - 1] = '\0';
   }
 
   const char* preset = presetName(d.preset);
   if (forceAll || strcmp(preset, lastPreset) != 0) {
-    drawValue(sprStrip, CELL_W + 2, STRIP_VALUE_TOP, CELL_W - 4, STRIP_VALUE_H,
-              preset, signalOk ? COL_PRESET : COL_STALE, 4);
+    drawValue(sprStrip, GRID_X0 + CELL_W + 2, STRIP_VALUE_TOP, CELL_W - 4,
+              STRIP_VALUE_H, preset, signalOk ? COL_PRESET : COL_STALE,
+              VALUE_FONT_STRIP);
     strncpy(lastPreset, preset, sizeof(lastPreset) - 1);
     lastPreset[sizeof(lastPreset) - 1] = '\0';
   }
@@ -260,7 +266,7 @@ void update(const AirLiftData& d, bool signalOk) {
     const char* text;
     uint16_t    colour;
     statusText(status, &text, &colour);
-    drawValue(sprStatus, 0, STATUS_Y, SCREEN_W, STATUS_H, text, colour, 2);
+    drawValue(sprStatus, GRID_X0, STATUS_Y, GRID_W, STATUS_H, text, colour, 2);
     lastStatus = status;
   }
 

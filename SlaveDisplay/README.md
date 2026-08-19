@@ -1,11 +1,36 @@
 # AirLift V2 — Slave Display
 
-Receive-only dashboard for the AirLift V2 MITM controller, running on an
-**ESP32-2432S028R** ("Cheap Yellow Display" / CYD): 2.8" ILI9341 320×240 + XPT2046
-resistive touch.
+Receive-only dashboard for the AirLift V2 MITM controller. Three boards share
+this firmware as separate PlatformIO envs:
 
-The master broadcasts an `AirLiftData` packet over ESP-NOW; this unit renders it.
-It never transmits, never pairs, and holds no state beyond the last packet.
+- **`cyd`** (default) — **ESP32-2432S028R** ("Cheap Yellow Display"): 2.8"
+  ILI9341 320×240 + XPT2046 resistive touch. TFT_eSPI.
+- **`round128`** — **Waveshare ESP32-S3-Touch-LCD-1.28**: 1.28" GC9A01
+  240×240 round panel + CST816T capacitive touch. TFT_eSPI.
+- **`round21`** — **Waveshare ESP32-S3-Touch-LCD-2.1**: 2.1" ST7701 480×480
+  round panel driven over the ESP32-S3's RGB-parallel LCD peripheral (not
+  SPI) + CST820 capacitive touch, both gated through a TCA9554 I2C IO
+  expander. Arduino_GFX — see "The round21 board" below for why.
+
+The master broadcasts an `AirLiftData` packet over ESP-NOW; the unit renders
+it. It never transmits, never pairs, and holds no state beyond the last
+packet.
+
+`display.cpp`/`touch.cpp` are identical between `cyd` and `round128` — every
+pixel position, font size, and pin comes from `include/config.h`, gated on
+the `DISPLAY_ROUND` build flag. `round128`'s grid is the same 2x2-corner /
+tank-preset-strip / status-bar layout as the CYD, just scaled down and inset
+so every box sits inside the circle the physical bezel actually shows — see
+"Round panel geometry" below before touching the numbers.
+
+`round21` can't share those files (TFT_eSPI has no working driver for its
+ST7701 RGB-parallel panel — see "The round21 board" below), so it gets its
+own `display_round21.cpp`/`touch_round21.cpp`/`tca9554.cpp`, selected per env
+by `build_src_filter` in `platformio.ini`. It follows the *same* 2x2-grid /
+strip / status-bar layout and the same `display::`/`touch::` interface as the
+other two, just against a different rendering backend — `main.cpp` and the
+ESP-NOW receive layer (`espnow_link.cpp`) don't know or care which board
+they're running on.
 
 ```
   0                160               319
@@ -22,13 +47,16 @@ It never transmits, never pairs, and holds no state beyond the last packet.
   |               RAISING                   |     ← colour-coded status bar
   +-----------------------------------------+  240
 ```
+*(`cyd` — 320×240 landscape, edge-to-edge)*
 
 ## Build & flash
 
 ```bash
-pio run              # build
-pio run -t upload    # flash over USB
-pio device monitor   # 115200 baud
+pio run                       # build the default env (cyd)
+pio run -e round128           # build the 1.28" round panel
+pio run -e round21            # build the 2.1" round panel
+pio run -e round128 -t upload # flash over USB
+pio device monitor -e round128 --baud 115200
 ```
 
 All TFT_eSPI configuration is passed as `-D` build flags from `platformio.ini`
@@ -36,11 +64,14 @@ All TFT_eSPI configuration is passed as `-D` build flags from `platformio.ini`
 survives a clean build or a `pio pkg update`. `User_Setup_CYD.h` in this folder
 is the same configuration as a drop-in `User_Setup.h`, for Arduino IDE builds.
 
-TFT_eSPI emits `#warning TOUCH_CS pin not defined` during the build. That is
-expected and correct: the CYD's XPT2046 sits on its own VSPI bus and is driven by
-`XPT2046_Touchscreen`, not by TFT_eSPI's built-in touch support. Handing
-TFT_eSPI a `TOUCH_CS` would make it talk to the touch chip over the display's
-HSPI bus, which is not how the board is wired.
+TFT_eSPI emits `#warning TOUCH_CS pin not defined` during the build, on the
+two TFT_eSPI envs. That is expected and correct: neither board's touch
+controller is driven by TFT_eSPI's built-in (resistive, SPI) touch support —
+the CYD's XPT2046 sits on its own VSPI bus via `XPT2046_Touchscreen`, and
+`round128`'s CST816T is a capacitive I2C part via `CST816S`, which TFT_eSPI
+has no concept of at all. A `TOUCH_CS` would (on the CYD) make TFT_eSPI talk
+to the touch chip over the display's own bus, which is not how the board is
+wired. `round21` doesn't use TFT_eSPI at all, so this doesn't apply to it.
 
 ## Build flags worth knowing
 
@@ -49,11 +80,116 @@ HSPI bus, which is not how the board is wired.
 | `ESPNOW_WIFI_CHANNEL` | `1` | **Must match the master's channel.** |
 | `ENABLE_TOUCH` | `0` | Compiles in the tap zones. Off because the unit is cluster-mounted. |
 | `DEMO_MODE` | `0` | Animates fake pressures so the panel can be tested with no master present. |
+| `DISPLAY_ROUND` | *(unset on `cyd`, `1` on `round128`)* | Selects `round128`'s pins/geometry/touch driver in `config.h`. Not something you set by hand — it's baked into that env's `build_flags`. |
+| `BOARD_ROUND21` | *(unset elsewhere, `1` on `round21`)* | Selects `round21`'s pins/geometry/touch driver in `config.h`. Also baked into that env's `build_flags`. |
 
-### Wi-Fi channel
+## Round panel (`round128`)
 
-ESP-NOW only works between radios parked on the same channel, and this end never
-associates with anything, so the channel is pinned explicitly at boot. If the
+Waveshare ESP32-S3-Touch-LCD-1.28: ESP32-S3R2, 16MB flash, GC9A01 240×240
+round panel on SPI, CST816T capacitive touch + QMI8658 IMU sharing one I2C
+bus (SDA 6 / SCL 7 — IMU is present on the board but this firmware doesn't
+use it). Flashes over the onboard CH343P USB-UART bridge, not the S3's native
+USB, so it's a plain serial upload like the CYD.
+
+Pin sourcing: the GC9A01 SPI pins come from three independent sources that
+all agree — TFT_eSPI's own bundled
+`User_Setups/Setup302_Waveshare_ESP32S3_GC9A01.h`, and two community
+Waveshare pinout writeups. The CST816T touch pins (`TOUCH_SDA/SCL/RST/IRQ` in
+`config.h`) come from a single community-verified PlatformIO project for this
+exact board — lower confidence than the panel pins, since Waveshare sells a
+plain (non-touch) `ESP32-S3-LCD-1.28` and a different `DualEye-1.28` board
+with similar names and different wiring. **Verify against your unit's
+schematic before relying on touch**, the same way this repo's other
+hardware docs ask you to re-check MFL/LIN pin assignments against your own
+car.
+
+### Round panel geometry
+
+The panel's framebuffer is a normal 240×240 rectangle — the round glass just
+physically masks whatever gets drawn outside its visible circle. Rather than
+give the round build its own layout code, its grid is the CYD's grid,
+inset so every box's farthest corner stays a few px inside a conservative
+118px-radius safe circle (measured from centre (120,120), not from any
+physical test — a 240-diameter circle's true radius is 120, and a couple of
+those px are typically lost to the bezel/lens, so this stays back from that
+edge on purpose). The math is inline as a comment in `config.h` next to
+`GRID_X0`/`GRID_Y0`: if your unit's visible circle is smaller and the grid's
+corners get clipped by the bezel, shrink those two constants (and grow
+`STATUS_H` to keep the bottom edge symmetric) until it clears.
+
+Consequently the corner/strip fonts on `round128` are smaller than the CYD's
+(Font 4, 26px, vs Font 6, 48px) — the round panel's cells are physically
+smaller, so the CYD's big digits-only Font 6 no longer fits.
+
+## The round21 board (`round21`)
+
+Waveshare ESP32-S3-Touch-LCD-2.1: ESP32-S3-WROOM-1-N16R8 (16MB Quad flash,
+8MB Octal PSRAM), ST7701 480×480 round panel, CST820 capacitive touch,
+TCA9554 I2C IO expander. This is a materially different board from the other
+two, not just a different pinout:
+
+- The panel isn't SPI. It's driven over the ESP32-S3's dedicated RGB-parallel
+  LCD peripheral (16 data lines + HSYNC/VSYNC/DE/PCLK) — the same peripheral
+  used for the RGB parallel LCDs on things like the ESP32-S3-BOX. A short
+  "3-wire SPI"-style link (CLK + MOSI only, no MISO, no real CS pin) is used
+  *only* to send the ST7701's one-time gamma/voltage/timing register init;
+  actual pixel data never touches that link.
+- **TFT_eSPI has no working ST7701-RGB support** (this is an open, unresolved
+  upstream issue, not something fixable from this repo), so this board can't
+  reuse `display.cpp`/`touch.cpp` the way `round128` does. It uses
+  [Arduino_GFX](https://github.com/moononournation/Arduino_GFX) ("GFX Library
+  for Arduino") instead, via a thin custom `Arduino_GFX` subclass
+  (`Arduino_ST7701` in `display_round21.cpp`) that routes the library's
+  drawing calls to `esp_lcd_panel_draw_bitmap()` against the panel's
+  PSRAM framebuffer.
+- The panel's reset and init-SPI "CS" aren't real GPIOs — they're bits on a
+  **TCA9554** I2C GPIO expander (`tca9554.cpp`), which also gates the CST820
+  touch controller's reset and the panel's power-enable line.
+
+**Pin/init sourcing and confidence:** the RGB data-pin mapping, TCA9554
+usage, and the full ST7701 register-init sequence (gamma curves, VOP/VCOM/
+VGH/VGL, timing) are ported **byte-for-byte** from a community-posted copy of
+what is, by its file names (`Display_ST7701.cpp`, `TCA9554PWR.cpp`,
+`Touch_CST820.cpp`, `I2C_Driver.cpp`), Waveshare's own Arduino demo for this
+board. Do not hand-edit the register values in `st7701Init()` — they're
+panel-specific gamma/voltage/timing, not arbitrary numbers, and this hasn't
+been tested against real glass. One deliberate deviation from that source:
+the demo also constructs an `Arduino_ESP32RGBPanel` bus object and calls its
+`begin()`, but nothing in its actual drawing path uses it (only the directly-
+created `esp_lcd_panel_handle_t` does) — reproducing that would mean
+configuring the RGB peripheral through two separate, uncoordinated paths, so
+it's dropped here as vestigial.
+
+**PSRAM matters on this board** in a way it doesn't on the other two: the RGB
+panel's two framebuffers live in PSRAM (`fb_in_psram = true`, `double_fb =
+true` in `rgbPanelInit()`), so `platformio.ini`'s `qio_opi` memory-type
+config (Quad flash + Octal PSRAM, matching the N16R8 module) has to be
+correct or the panel simply won't come up. If your unit uses a different
+ESP32-S3 module variant, check its flash/PSRAM mode before flashing.
+
+**round21 layout** follows the same inscribed-square reasoning as
+`round128`'s (see above) — this panel is 4x the pixel area with a much more
+generous safe circle, so the numbers in `config.h`'s `BOARD_ROUND21` block
+have more headroom, but they're equally unverified against real glass.
+Arduino_GFX's built-in font is a fixed 6x8px bitmap glyph scaled by an
+integer `setTextSize()` — there's no font-ID system like TFT_eSPI's, hence
+the `VALUE_TEXTSIZE_CORNER`/`LABEL_TEXTSIZE`/etc. macros instead of
+`VALUE_FONT_CORNER`.
+
+Unlike the two TFT_eSPI boards, `round21`'s value redraws skip the
+sprite-composition trick entirely (`drawValue()` just does a plain
+`fillRect` + centred `print()`). That trick exists on the other boards to
+hide the visible time an SPI transfer takes; here the "display" is a PSRAM
+framebuffer the RGB peripheral scans out continuously in hardware, so writing
+into it is just a RAM store with no transfer-time flicker to hide. The
+diffed-redraw cache (skip repainting a box whose text didn't change) is kept
+anyway, purely to save CPU at the ~10 Hz update rate.
+
+## Wi-Fi channel
+
+Applies to all three boards. ESP-NOW only works between radios parked on the
+same channel, and this end never associates with anything, so the channel is
+pinned explicitly at boot. If the
 master is running its SoftAP (web UI) on a channel other than 1, set
 `ESPNOW_WIFI_CHANNEL` to match or **no packets will ever arrive** — the display
 will sit on `NO SIGNAL` with no other symptom.
@@ -105,22 +241,41 @@ display does not go blank when its power-saving would otherwise drop Wi-Fi.
 
 ## Touch (`ENABLE_TOUCH=1`)
 
-Calibrated for raw X/Y 200–3900, remapped to landscape with the axes swapped and
-Y mirrored. Tap zones: the four corner quadrants in the top half, and preset
-down / preset up on the left / right of the tank-preset strip. Each hit currently
-just does a `Serial.printf` — the actual command injection is master-side work
-still to be wired up.
+Tap-zone logic is the same shape on every board (`dispatch()`, in whichever
+`touch*.cpp` the env compiles): the four corner quadrants, and preset down /
+preset up on the left / right of the tank-preset strip, driven by that env's
+`GRID_X0/Y0`/`CELL_W`/`CELL_H` geometry. Each hit currently just does a
+`Serial.printf` — the actual command injection is master-side work still to
+be wired up. The three boards' raw-read front ends differ:
 
-If taps land in the mirrored position, swap the endpoints of one `map()` call in
-`mapRaw()` (`src/touch.cpp`).
+- **`cyd`** — XPT2046 resistive, its own SPI bus. Calibrated for raw X/Y
+  200–3900, remapped to landscape with the axes swapped and Y mirrored in
+  `mapRaw()`. If taps land in the mirrored position, swap the endpoints of one
+  `map()` call there.
+- **`round128`** — CST816T capacitive, I2C (`fbiego/CST816S`). Reports
+  `touch.data.x/y` directly in panel space at rotation 0 — no raw-range
+  calibration or axis remap needed. If your mounting uses a different
+  `TFT_ROTATION`, the touch coordinates will need the same remap treatment
+  `mapRaw()` gives the CYD.
+- **`round21`** — CST820 capacitive, I2C, reset via the TCA9554 expander
+  (`touch_round21.cpp`, register map ported from Waveshare's demo — see "The
+  round21 board" above). Also reports coordinates directly in panel space at
+  rotation 0, same caveat as `round128` if you change `DISPLAY_ROTATION`.
 
 ## Layout
 
 | File | Contents |
 | --- | --- |
-| `include/config.h` | Touch pins, layout geometry, colours, timeouts |
+| `include/config.h` | Per-board pins + layout geometry (`DISPLAY_ROUND`/`BOARD_ROUND21`-gated), colours, timeouts |
 | `include/airlift_espnow.h` | The shared wire struct — **keep in sync with the master** |
-| `src/espnow_link.cpp` | STA mode, fixed channel, receive callback, staleness |
-| `src/display.cpp` | Static layout + diffed value rendering |
-| `src/touch.cpp` | XPT2046 on VSPI, tap zone dispatch |
-| `src/main.cpp` | Boot, loop, preset names |
+| `src/espnow_link.cpp` | STA mode, fixed channel, receive callback, staleness — shared, board-agnostic |
+| `src/display.cpp` | `cyd`/`round128` (TFT_eSPI): static layout + diffed value rendering, driven entirely by `config.h` |
+| `src/touch.cpp` | `cyd`/`round128`: tap-zone dispatch; XPT2046 (CYD, VSPI) or CST816T (round128, I2C) front end |
+| `src/display_round21.cpp` | `round21` (Arduino_GFX): ST7701 init, RGB panel bring-up, `Arduino_ST7701` GFX subclass, layout + diffed rendering |
+| `src/touch_round21.cpp` | `round21`: tap-zone dispatch + CST820 front end |
+| `src/tca9554.cpp` | `round21`: TCA9554 I2C IO-expander driver (panel reset/CS/power, touch reset) |
+| `src/main.cpp` | Boot, loop, preset names — shared, board-agnostic |
+
+Each env's `build_src_filter` in `platformio.ini` picks the right pair of
+`display*`/`touch*` files and excludes `tca9554.cpp` on the two boards that
+don't have one.
