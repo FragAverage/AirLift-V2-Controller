@@ -33,6 +33,7 @@ static const char* kKeyBootDelay     = "bootDelay";
 static const char* kKeyCanBcEn       = "canBcEn";
 static const char* kKeyCanBcId       = "canBcId";
 static const char* kKeyEspNow         = "espnowEn";
+static const char* kKeyBenchMode      = "benchMode";
 static const char* kKeySavvyWifi      = "savvyWifi";
 static const char* kKeySavvySerial    = "savvySerial";
 static const char* kKeyPowertrainCan  = "powertrainCan";
@@ -95,6 +96,7 @@ void loadPreferences() {
     canBroadcastId = id;
   }
   espnowEnabled = preferences.getBool(kKeyEspNow, true);
+  benchMode     = preferences.getBool(kKeyBenchMode, false);
   savvyCanWifiEnabled = preferences.getBool(kKeySavvyWifi, false);
   savvyCanSerialEnabled = preferences.getBool(kKeySavvySerial, false);
   if (savvyCanSerialEnabled) savvyCanWifiEnabled = false;
@@ -246,6 +248,7 @@ void setupApiServer() {
     doc["canBroadcastEnabled"] = (bool)canBroadcastEnabled;
     doc["canBroadcastId"]      = canBroadcastId;
     doc["espnowEnabled"]       = (bool)espnowEnabled;
+    doc["benchMode"]           = (bool)benchMode;
     doc["savvyCanWifiEnabled"] = (bool)savvyCanWifiEnabled;
     doc["savvyCanSerialEnabled"] = (bool)savvyCanSerialEnabled;
     doc["usePowertrainCan"] = (bool)usePowertrainCan;
@@ -331,6 +334,9 @@ void setupApiServer() {
       if (!doc["espnowEnabled"].isNull()) {
         espnowEnabled = doc["espnowEnabled"].as<bool>();
       }
+      if (!doc["benchMode"].isNull()) {
+        benchMode = doc["benchMode"].as<bool>();
+      }
 
       if (!doc["savvyCanWifiEnabled"].isNull()) {
         savvyCanSetWifiEnabled(doc["savvyCanWifiEnabled"].as<bool>());
@@ -364,6 +370,7 @@ void setupApiServer() {
       preferences.putBool(kKeyCanBcEn, (bool)canBroadcastEnabled);
       preferences.putUInt(kKeyCanBcId, canBroadcastId);
       preferences.putBool(kKeyEspNow, (bool)espnowEnabled);
+      preferences.putBool(kKeyBenchMode, (bool)benchMode);
       preferences.putBool(kKeySavvyWifi, (bool)savvyCanWifiEnabled);
       preferences.putBool(kKeySavvySerial, (bool)savvyCanSerialEnabled);
       preferences.putBool(kKeyPowertrainCan, (bool)usePowertrainCan);
@@ -737,6 +744,17 @@ void setupApiServer() {
 // is running). CAN only WAKES us from reduced power via pollCanRx(); it does
 // not keep us awake here.
 bool powerIsBusy() {
+  // Bench-test override (Settings -> Slave Display -> Bench Mode): forces
+  // the radio to stay up unconditionally. Needed because ignitionOn is
+  // derived purely from CAN bus activity (see tasks.cpp's ignPresent() —
+  // the dedicated ignition-sense GPIO was removed and repurposed for the MFL
+  // signal), so it's legitimately false with no CAN bus connected, which
+  // looks identical to "car parked" from here. Leave this off for a real
+  // install: the board there is switched-12V powered from ignition, so it's
+  // only ever running with real CAN traffic present, and ignitionOn tracks
+  // correctly on its own.
+  if (benchMode) return true;
+
   // The slave display is a live gauge cluster: it must keep updating whenever
   // the car is running, and ESP-NOW dies with the radio. So while the broadcast
   // is enabled AND the ignition is on, the radio stays up. Ignition off (car

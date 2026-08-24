@@ -318,6 +318,17 @@
           <span class="toggle-label">Broadcast to slave display</span>
           <input type="checkbox" id="espnowEnabled">
         </label>
+        <label class="toggle-row">
+          <span class="toggle-label">Bench mode (keep radio on, ignore ignition/CAN)</span>
+          <input type="checkbox" id="benchMode">
+        </label>
+        <p class="help">
+          Bench mode forces the WiFi radio to stay up unconditionally, for
+          testing with no CAN bus connected (ignition is normally inferred
+          from CAN activity, so it reads as "off" on a bare bench). Leave
+          this off for a real install &mdash; there the board is
+          switched-12V from ignition, so this never matters.
+        </p>
         <div class="brightness-row">
           <span class="toggle-label">Packets sent / errors</span>
           <div class="brightness-controls">

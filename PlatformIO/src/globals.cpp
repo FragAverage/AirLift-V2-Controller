@@ -50,6 +50,7 @@ volatile uint32_t canBroadcastErrors   = 0;
 volatile bool     espnowEnabled       = true;
 volatile uint32_t espnowSent           = 0;
 volatile uint32_t espnowErrors         = 0;
+volatile bool     benchMode            = false;
 volatile bool     savvyCanWifiEnabled  = false;
 volatile bool     savvyCanSerialEnabled = false;
 volatile uint32_t savvyCanFramesDropped = 0;
