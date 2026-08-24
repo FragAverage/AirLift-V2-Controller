@@ -17,3 +17,6 @@ fp-info-cache
 *.kicad_pcb-bak
 *.kicad_sch-bak
 *.pre-compact-*.kicad_pcb
+
+# Local file-history snapshots (tool-generated, contains its own nested .git)
+.history/
