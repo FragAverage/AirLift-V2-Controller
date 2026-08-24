@@ -11,6 +11,7 @@
 #include "espnow_tx.h"
 #include "globals.h"
 #include "io.h"
+#include "mfl.h"
 
 // ---------------------------------------------------------------------------
 // Transform-in-flight MITM.
@@ -290,20 +291,18 @@ void releaseManualButton() {
   portEXIT_CRITICAL(&airliftMux);
 }
 
-// Ignition / power state machine. The ignition signal comes from one of two
-// sources (user-selectable): CAN presence (default) OR a hard-wired aux GPIO
-// (ignitionSenseGpio) which is instant and doesn't wait on a CAN silence
-// timeout. When the aux GPIO is used, a grace buffer (ignitionOffGraceMs)
-// debounces a brief dropout before air-out is triggered.
+// Ignition / power state machine. The ignition signal comes from CAN
+// presence — this used to also support a hard-wired aux GPIO
+// (ignitionSenseGpio / pinIgnitionSense, with its own ST_OFFGRACE buffer
+// state), removed when that pin (GPIO39) was repurposed to carry the MFL
+// signal instead (see defs.h's pinMflSignal).
 static void ignitionTask(void* arg) {
   (void)arg;
-  enum State { ST_OFF, ST_ON, ST_OFFGRACE, ST_POSTDELAY };
+  enum State { ST_OFF, ST_ON, ST_POSTDELAY };
   State state = ST_OFF;
   uint32_t stateEnter = 0;
 
-  // Ignition present? Aux GPIO (HIGH = on) when enabled, else CAN presence.
   auto ignPresent = []() -> bool {
-    if (ignitionSenseGpio) return digitalRead(pinIgnitionSense) == HIGH;
     return canActive();
   };
 
@@ -383,6 +382,7 @@ static void ignitionTask(void* arg) {
     canBroadcastTick();
     serviceDeferredWifi();
     espnowTxTick();
+    mflDiagTick();
     const bool ign = ignPresent();
     const uint32_t now = millis();
     tickManualTarget(now);
@@ -454,28 +454,7 @@ static void ignitionTask(void* arg) {
       case ST_ON:
         if (!ign) {
           ignitionOn = false;
-          if (ignitionSenseGpio) {
-            // Aux-GPIO ignition: buffer before airing out.
-            state = ST_OFFGRACE;
-            stateEnter = now;
-            logLine("ignition OFF (aux) — %us buffer before air-out",
-                    (unsigned)(ignitionOffGraceMs / 1000));
-          } else {
-            logLine("ignition OFF");
-            triggerAirOut(now, false);
-            state = ST_POSTDELAY;
-            stateEnter = now;
-          }
-        }
-        break;
-
-      case ST_OFFGRACE:
-        if (ign) {
-          ignitionOn = true;
-          state = ST_ON;
-          stateEnter = now;
-          logLine("ignition back within buffer — air-out cancelled");
-        } else if (now - stateEnter >= ignitionOffGraceMs) {
+          logLine("ignition OFF");
           triggerAirOut(now, false);
           state = ST_POSTDELAY;
           stateEnter = now;

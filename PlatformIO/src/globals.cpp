@@ -77,7 +77,6 @@ volatile uint8_t airUpFrontPsi = 0;
 volatile uint8_t airUpRearPsi = 0;
 volatile uint8_t airDownFrontPsi = 0;
 volatile uint8_t airDownRearPsi = 0;
-volatile bool    ignitionSenseGpio = false;
 volatile bool    passThroughMode = true;
 
 volatile bool    interceptMode = false;

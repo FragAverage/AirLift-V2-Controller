@@ -33,6 +33,12 @@ void handleCommand(const uint8_t* data, int len) {
   if (len != (int)sizeof(AirLiftCommand)) return;
   AirLiftCommand cmd;
   memcpy(&cmd, data, sizeof(cmd));
+
+  // Tracks the manual code already written to the event log, so the ~20 Hz
+  // CMD_MANUAL_PRESS heartbeat below logs once on the edge into a new press
+  // rather than once per frame for as long as the button stays held.
+  static uint8_t s_loggedManualCode = 0;
+
   switch (cmd.cmd) {
     case CMD_SELECT_PRESET:
       queuePresetByIndex(cmd.param, kInterceptPresetHoldMsDefault, "MFL menu");
@@ -43,9 +49,17 @@ void handleCommand(const uint8_t* data, int len) {
       // long as the physical MFL button stays held, each call extending the
       // window. If the display stops sending (link drop, button released),
       // the window simply expires — no explicit timeout logic needed here.
+      if (cmd.param != s_loggedManualCode) {
+        logLine("MFL menu: manual 0x%02X press", (unsigned)cmd.param);
+        s_loggedManualCode = cmd.param;
+      }
       queueManualButton(cmd.param, kInterceptManualPressWindowMs);
       break;
     case CMD_MANUAL_RELEASE:
+      if (s_loggedManualCode != 0) {
+        logLine("MFL menu: manual release");
+        s_loggedManualCode = 0;
+      }
       releaseManualButton();
       break;
     default:

@@ -36,3 +36,13 @@ void mflInit();
 // Latest confirmed button state (double-read frames matching, exactly-one-flag
 // rule applied) — safe to call from any task.
 MflButtons mflRead();
+
+// Bring-up diagnostic: once a second (self-rate-limited, safe to call every
+// loop), logs raw ISR edge count, completed-frame count, and the last
+// decoded raw 7-bit value BEFORE the exactly-one-match filter -- lets a
+// serial capture distinguish "nothing reaching the GPIO at all" (edges stuck
+// at 0) from "edges arriving but never syncing into a full frame" (frames
+// stuck at 0, e.g. wrong kSignalInverted polarity) from "frames decoding but
+// never passing the button filter" (frames climbing, lastRaw not -1 but
+// mflRead() never confirms a button).
+void mflDiagTick();

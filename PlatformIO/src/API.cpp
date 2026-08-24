@@ -24,7 +24,6 @@ static const char* kKeyAirUpFront     = "airUpFront";
 static const char* kKeyAirUpRear      = "airUpRear";
 static const char* kKeyAirDownFront   = "airDownFront";
 static const char* kKeyAirDownRear    = "airDownRear";
-static const char* kKeyIgnSense      = "ignSense";
 static const char* kKeyPresetNames   = "presetNames";
 static const char* kKeyPassThrough   = "passthru";
 static const char* kKeyIntercept     = "intercept";
@@ -63,7 +62,6 @@ void loadPreferences() {
   airUpRearPsi = preferences.getUChar(kKeyAirUpRear, 0);
   airDownFrontPsi = preferences.getUChar(kKeyAirDownFront, 0);
   airDownRearPsi = preferences.getUChar(kKeyAirDownRear, 0);
-  ignitionSenseGpio = preferences.getBool(kKeyIgnSense, false);
   passThroughMode = preferences.getBool(kKeyPassThrough, false);
   interceptMode   = !passThroughMode;
 
@@ -231,7 +229,6 @@ void setupApiServer() {
   server.on("/api/setup", HTTP_GET, [](AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["airOutOnIgnOff"]  = (bool)airOutOnIgnOff;
-    doc["ignitionSenseGpio"] = (bool)ignitionSenseGpio;
     doc["zeroPsiPreset"]   = zeroPsiPreset;
     doc["airUpOnFobDouble"] = (bool)airUpOnFobDouble;
     doc["airDownOnFobDouble"] = (bool)airDownOnFobDouble;
@@ -279,9 +276,6 @@ void setupApiServer() {
       }
       if (!doc["airOutOnIgnOff"].isNull()) {
         airOutOnIgnOff = doc["airOutOnIgnOff"].as<bool>();
-      }
-      if (!doc["ignitionSenseGpio"].isNull()) {
-        ignitionSenseGpio = doc["ignitionSenseGpio"].as<bool>();
       }
       int z = doc["zeroPsiPreset"] | (int)zeroPsiPreset;
       if (z < 0 || (z >= kPresetCount && z != kZeroPresetManual)) z = kZeroPresetManual;
@@ -353,7 +347,6 @@ void setupApiServer() {
         usePowertrainCan = !useComfortCan;
       }
       preferences.putBool(kKeyAirOut, (bool)airOutOnIgnOff);
-      preferences.putBool(kKeyIgnSense, (bool)ignitionSenseGpio);
       preferences.putUChar(kKeyZeroPreset, zeroPsiPreset);
       preferences.putBool(kKeyAirUpFob, (bool)airUpOnFobDouble);
       preferences.putBool(kKeyAirDownFob, (bool)airDownOnFobDouble);

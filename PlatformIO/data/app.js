@@ -109,7 +109,7 @@ function init() {
 
 function initSettings() {
   // Checkboxes — save immediately on change
-  const checkboxIds = ["passThroughMode", "airOutOnIgnOff", "ignitionSenseGpio", "canBroadcastEnabled",
+  const checkboxIds = ["passThroughMode", "airOutOnIgnOff", "canBroadcastEnabled",
     "espnowEnabled", "airUpOnFobDouble", "airDownOnFobDouble"];
   checkboxIds.forEach((id) => {
     const el = document.getElementById(id);
@@ -398,7 +398,6 @@ async function saveLearn() {
 function renderSettings(s) {
   const cb = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
   cb("airOutOnIgnOff",    s.airOutOnIgnOff);
-  cb("ignitionSenseGpio", s.ignitionSenseGpio);
   cb("airUpOnFobDouble", s.airUpOnFobDouble);
   cb("airDownOnFobDouble", s.airDownOnFobDouble);
   cb("passThroughMode",   s.passThroughMode);

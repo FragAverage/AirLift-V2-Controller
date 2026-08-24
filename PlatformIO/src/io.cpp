@@ -11,7 +11,8 @@ void setupPins()
   pinMode(pinWake_LIN, OUTPUT);          // LIN WAKE on TJA1020 — held HIGH for normal operation (same as MFSW controller)
   pinMode(pinCS_LIN, OUTPUT);            // LIN transceivers chip select / power enable — HIGH = enabled
   pinMode(pinControllerPower, OUTPUT);   // controller power to handheld
-  pinMode(pinIgnitionSense, INPUT);      // aux input — optional ignition sense
+  // GPIO39 (formerly the aux ignition-sense input configured here) is now
+  // pinMflSignal — mflInit() owns its pinMode()/attachInterrupt() instead.
   digitalWrite(pinWake_LIN, HIGH);       // held HIGH = normal operation (same as MFSW controller)
   digitalWrite(pinCS_LIN, HIGH);         // HIGH = transceivers enabled
   digitalWrite(pinControllerPower, LOW); // controller power off at boot (the handheld's own power switch is the master)  — HIGH = +12 V to handheld during air-out (ignition off)

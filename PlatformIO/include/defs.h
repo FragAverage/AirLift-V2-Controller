@@ -11,7 +11,7 @@
 //     serial debug statement.
 //   * With enableDebug = 1, set the flags below to choose specific Serial outputs
 // ---------------------------------------------------------------------------
-#define enableDebug 0        // ** MASTER ** 0 = silence ALL serial debug
+#define enableDebug 1        // ** MASTER ** 0 = silence ALL serial debug
 
 #define debugSys    1        // [SYS]   boot / general / 1 Hz telemetry
 #define debugPower  1        // [PWR]   power_manager (reduced power / wake)
@@ -132,15 +132,17 @@ constexpr int pinCAN_TX = 14;
 // High-side MOSFET (5A) to power the controller
 constexpr int pinControllerPower = 21;   // HIGH = keep +12 V to handheld during air-out (ignition off)
 
-// Auxiliary input. Used here as an optional hard-wired ignition-sense line: HIGH =
-// ignition on. Chosen instead of CAN presence for an instant ignition signal
-// not really suitable - will only ack. unlock OR lock (if wired to door modules).  Cannot tell the difference.
-constexpr int pinIgnitionSense = 39;
-
 // MFL steering-wheel cruise-button single-wire input (through the optocoupler
 // isolation stage — see pcb/PCB-REQUIREMENTS.md and MFL-FINDINGS.md). Input-
 // only pin, no internal pull, can't be accidentally driven as an output.
-constexpr int pinMflSignal = 34;
+//
+// This is GPIO39, the PCB's former aux-input/ignition-sense line (see the
+// KiCad netlist's IGN_SENSE net, J_DEVKIT_L pin 3) — that feature has been
+// removed and the physical wire repurposed to carry the MFL PWM signal
+// instead. GPIO34 (J_DEVKIT_L pin 4, net MFL_IN) was the original PCB plan
+// and is confirmed free/unused, but is NOT what's actually wired on this
+// board; do not switch back to it without rewiring.
+constexpr int pinMflSignal = 39;
 
 // ---------------------------------------------------------------------------
 // Protocol — frame format A: FA-framed polls / responses
@@ -358,10 +360,6 @@ constexpr uint32_t kInterceptManualTapMsDefault  = 100;
 // Manual button "press"/"hold" safety window: how long a held button stays
 // active if the UI stops sending heartbeats to extend it.
 constexpr uint32_t kInterceptManualPressWindowMs = 1500;
-// When ignition is sensed via the aux GPIO (not CAN), wait this long after it
-// goes off before airing out, so a brief dropout (crank/stall) doesn't dump the
-// bags. CAN mode already has its own silence timeout, so this only gates GPIO.
-constexpr uint32_t ignitionOffGraceMs   = 10000;
 
 // ---------------------------------------------------------------------------
 // ESP-NOW broadcast (firmware -> slave display, see ../SlaveDisplay)

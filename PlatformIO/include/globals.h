@@ -110,10 +110,6 @@ extern volatile uint8_t airUpFrontPsi;
 extern volatile uint8_t airUpRearPsi;
 extern volatile uint8_t airDownFrontPsi;
 extern volatile uint8_t airDownRearPsi;
-// When true, ignition is sensed from the aux-input GPIO (pinIgnitionSense)
-// instead of CAN presence: an instant, hard-wired signal with a fixed grace
-// buffer (ignitionOffGraceMs) before air-out. Alternative to CAN detection.
-extern volatile bool    ignitionSenseGpio;
 extern volatile bool    passThroughMode;   // true = pure MITM, no captures/injects/air-out
 
 // Intercept mode: when true, frames from the real handheld are dropped and

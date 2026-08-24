@@ -1,6 +1,7 @@
 #include "mfl.h"
 
 #include "defs.h"
+#include "globals.h"
 
 namespace {
 
@@ -24,7 +25,14 @@ volatile bool     s_haveSync   = false;
 volatile bool     s_frameReady = false;
 volatile uint32_t s_frameWidths[kPulsesPerMessage];
 
+// Bring-up diagnostics — see mflDiagTick() / mfl.h.
+volatile uint32_t s_isrEdgeCount = 0;
+volatile uint32_t s_frameCount   = 0;
+volatile int32_t  s_lastRawValue = -1;
+
 void IRAM_ATTR mflIsr() {
+  s_isrEdgeCount++;
+
   const uint32_t now = micros();
   bool isMark = digitalRead(pinMflSignal) == HIGH;
   if (kSignalInverted) isMark = !isMark;
@@ -56,6 +64,7 @@ void IRAM_ATTR mflIsr() {
     for (uint8_t i = 0; i < kPulsesPerMessage; ++i) s_frameWidths[i] = s_pulseWidths[i];
     s_frameReady = true;
     portEXIT_CRITICAL_ISR(&s_mux);
+    s_frameCount++;
     s_pulseCount = 0;
     s_haveSync = false;   // require a fresh gap before the next message
   }
@@ -68,6 +77,7 @@ MflButtons decodeFrame(const uint32_t widths[kPulsesPerMessage]) {
     // MFL-FINDINGS.md "Bit polarity" for why).
     if (widths[i] < kBitThresholdUs) value |= 1 << (7 - i);
   }
+  s_lastRawValue = value;
 
   MflButtons s;
   // value == 0 is idle and trivially satisfies all four masks — without this
@@ -130,4 +140,30 @@ MflButtons mflRead() {
   }
 
   return s_confirmed;
+}
+
+void mflDiagTick() {
+  const uint32_t now = millis();
+
+  static uint32_t s_lastDebugMs = 0;
+  if (now - s_lastDebugMs >= 1000) {
+    s_lastDebugMs = now;
+    DEBUG_MFL("diag: edges=%lu frames=%lu lastRaw=%ld confirmed(+=%d -=%d set=%d io=%d)",
+              (unsigned long)s_isrEdgeCount, (unsigned long)s_frameCount,
+              (long)s_lastRawValue, s_confirmed.plus, s_confirmed.minus,
+              s_confirmed.set, s_confirmed.io);
+  }
+
+  // Also mirrored into the persisted event log (visible over the web UI,
+  // no serial/USB connection needed) at a slower 5s cadence -- this is
+  // bring-up-only instrumentation, and the log ring buffer only holds 64
+  // entries (see globals.h's kLogLineCount), so this would otherwise crowd
+  // out real events within about a minute.
+  static uint32_t s_lastWebLogMs = 0;
+  if (now - s_lastWebLogMs >= 5000) {
+    s_lastWebLogMs = now;
+    logLine("MFL diag: edges=%lu frames=%lu lastRaw=%ld pin=GPIO%d",
+            (unsigned long)s_isrEdgeCount, (unsigned long)s_frameCount,
+            (long)s_lastRawValue, pinMflSignal);
+  }
 }
