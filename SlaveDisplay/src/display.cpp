@@ -120,6 +120,12 @@ void begin() {
   // something worth looking at.
   setBacklight(0);
 
+#ifdef BOARD_LCD147
+  // Onboard addressable RGB LED powers up showing a colour until explicitly
+  // written to; this firmware doesn't use it, so turn it off immediately.
+  neopixelWrite(RGB_LED_PIN, 0, 0, 0);
+#endif
+
   tft.init();
   tft.setRotation(TFT_ROTATION);
   tft.fillScreen(COL_BG);
@@ -132,6 +138,16 @@ void begin() {
 }
 
 void setBacklight(uint8_t percent) {
+#ifdef BOARD_LCD147
+  // GPIO46 (this board's LCD_BL per Waveshare's own pin table) is the one
+  // genuinely input-only GPIO on the ESP32-S3 -- it cannot drive PWM or any
+  // output at all, confirmed by ledcAttach/digitalWrite both erroring at
+  // runtime ("IO 46 is not set as GPIO") despite the panel itself working
+  // fine. The backlight is evidently always-on in hardware on this board;
+  // nothing to do here.
+  (void)percent;
+  return;
+#else
   if (percent > 100) percent = 100;
   const uint32_t maxDuty = (1u << BACKLIGHT_PWM_BITS) - 1;
   uint32_t duty = (maxDuty * percent) / 100;
@@ -159,6 +175,7 @@ void setBacklight(uint8_t percent) {
 #else
   ledcWrite(BACKLIGHT_PWM_CH, duty);
 #endif
+#endif  // BOARD_LCD147
 }
 
 void splash() {

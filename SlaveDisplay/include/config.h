@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Four boards share this firmware:
+// Five boards share this firmware:
 //
 //   - ESP32-2432S028R "Cheap Yellow Display" (default) — ILI9341 320x240
 //     landscape + XPT2046 resistive touch on its own SPI bus. Rendered with
@@ -24,6 +24,11 @@
 //     src/touch_oled13.cpp (this board has no touch hardware at all, so
 //     that file is just a stub). No backlight — "brightness" maps to the
 //     SH1106's contrast register instead of PWM.
+//   - Waveshare ESP32-S3-LCD-1.47B (build flag BOARD_LCD147=1) — ST7789
+//     172x320 SPI panel, rotated to a 320x172 landscape canvas, no touch
+//     hardware. Also TFT_eSPI, shares src/display.cpp and src/touch.cpp
+//     (ENABLE_TOUCH=0 makes touch.cpp compile to a no-op stub) with the CYD
+//     and round128 boards above.
 //
 // platformio.ini's build_src_filter keeps each env compiling only its own
 // display/touch files. Panel SPI pins for the two TFT_eSPI boards live in
@@ -100,6 +105,20 @@
                              // generic/eBay SH1106 breakouts — check yours if
                              // the screen stays blank with no I2C errors.
 
+#elif defined(BOARD_LCD147)
+
+// No touch hardware on this board at all — every button input comes from
+// the MFL menu instead (see menu.h), same as BOARD_OLED13. Nothing here
+// actually needs TP_DEBOUNCE_MS, kept only so config.h's shape doesn't
+// surprise a reader expecting every board branch to define it.
+#define TP_DEBOUNCE_MS 250
+
+// Onboard WS2812-style addressable "RGB light bead" per Waveshare's pin
+// table. Unused by this firmware, and powers up showing a colour until
+// explicitly written to (undefined power-on state, same as any addressable
+// LED) -- display::begin() sends it an off frame via neopixelWrite().
+#define RGB_LED_PIN 38
+
 #else  // CYD
 
 // --- Touch (XPT2046 on VSPI, separate bus from the panel) ------------------
@@ -116,7 +135,7 @@
 // Ignore repeat taps inside this window.
 #define TP_DEBOUNCE_MS 250
 
-#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13
+#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13 / BOARD_LCD147
 
 // --- Serial ----------------------------------------------------------------
 #define SERIAL_BAUD 115200
@@ -295,6 +314,60 @@
 #define SPLASH_Y_PRODUCT  32
 #define SPLASH_Y_VERSION  48
 
+#elif defined(BOARD_LCD147)
+
+// Native panel is 172x320 portrait; rotated to a 320x172 landscape canvas,
+// same convention as the CYD's rotation below. Untested on real hardware —
+// if the image comes up mirrored/rotated wrong, try 3 instead of 1 before
+// touching anything else.
+#define TFT_ROTATION 1
+
+#define SCREEN_W 320
+#define SCREEN_H 172
+
+#define GRID_X0  0
+#define GRID_Y0  0
+#define GRID_W   SCREEN_W
+#define GRID_H   108                 // total height of the 2x2 corner grid
+#define CELL_W   (GRID_W / 2)        // 160
+#define CELL_H   (GRID_H / 2)        // 54
+
+#define STRIP_Y  (GRID_Y0 + GRID_H)  // 108 — tank / preset strip
+// The strip holds a static label (font 2, drawn once in drawStaticLayout())
+// AND a live value (font 4) stacked below it -- STRIP_H/STRIP_VALUE_TOP/H
+// reuse round128's exact proven numbers rather than being scaled from this
+// panel's height, since font pixel sizes are fixed and don't scale with the
+// screen. Getting this wrong doesn't fail to compile -- it silently paints
+// the live value's background square over the static label every update()
+// (see display.cpp's drawValue()), erasing "TANK"/"PRESET" a moment after
+// drawStaticLayout() draws them.
+#define STRIP_H  42                  // 108..150
+
+#define STATUS_Y (STRIP_Y + STRIP_H)  // 150
+#define STATUS_H (SCREEN_H - STATUS_Y)  // 22
+
+#define CELL_VALUE_TOP    18   // relative to the cell origin -- round128's numbers
+#define CELL_VALUE_H      28
+#define STRIP_VALUE_TOP   (STRIP_Y + 16)  // round128's numbers -- starts after
+#define STRIP_VALUE_H     22              // the STRIP_Y+4 label, doesn't overlap it
+
+// Same reasoning as round128: this cell is too short for Font 6 (48px,
+// digits-only) — Font 4 (26px) is the proven fit at a similar cell height.
+#define VALUE_FONT_CORNER 4
+#define VALUE_FONT_STRIP  4
+
+// Splash text, compact for this panel's short 172px canvas. Y values are
+// MC_DATUM centres (see display.cpp's splash()) -- vertically centred so
+// the block's top/bottom margins come out roughly equal (~43px each) within
+// SCREEN_H=172.
+#define SPLASH_HANDLE_FONT 4
+#define SPLASH_HANDLE_SIZE 1
+#define SPLASH_Y_HANDLE       56
+#define SPLASH_Y_RULE         78
+#define SPLASH_RULE_HALFLEN   50
+#define SPLASH_Y_PRODUCT      98
+#define SPLASH_Y_VERSION      120
+
 #else  // CYD
 
 #define TFT_ROTATION 1  // landscape, 320x240
@@ -331,7 +404,7 @@
 #define SPLASH_Y_PRODUCT      156
 #define SPLASH_Y_VERSION      186
 
-#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13 (see the OLED branch above)
+#endif  // DISPLAY_ROUND / BOARD_ROUND21 / BOARD_OLED13 / BOARD_LCD147 (see the OLED branch above)
 
 // --- Splash ------------------------------------------------------------
 #define SPLASH_HANDLE   "@jd_drift"
@@ -348,20 +421,23 @@
 #define BACKLIGHT_PWM_BITS 8
 
 // --- Colours ---------------------------------------------------------------
-// Deliberately desaturated. Pure white / pure cyan / pure red on black glows
-// badly behind cluster glazing at night; these are pulled back towards the
-// warm greys an OEM cluster actually uses while keeping the status colours
-// unambiguous at a glance. Raw RGB565 (not e.g. TFT_eSPI's TFT_BLACK) since
-// this header is shared with the round21 build's Arduino_GFX code, which
-// doesn't define TFT_eSPI's colour macros.
+// Early-2000s BMW/VDO cluster look: black background, amber/orange numerals
+// and labels (the colour those clusters actually backlight in), rather than
+// white/grey/teal. RAISING stays a genuine green and NOSIGNAL stays a
+// genuine red -- those two are real at-a-glance status signals (direction
+// while driving, and a fault condition), not just theming, so they're kept
+// distinct from the orange family on purpose rather than folded into it.
+// Raw RGB565 (not e.g. TFT_eSPI's TFT_BLACK) since this header is shared
+// with the round21 build's Arduino_GFX code, which doesn't define
+// TFT_eSPI's colour macros.
 #define COL_BG        0x0000    // black
-#define COL_VALUE     0xDEB9    // warm off-white — corner pressures
-#define COL_STALE     0x4208    // dim grey — pressures held over from a lost link
-#define COL_LABEL     0x8410    // mid grey — FL / FR / RL / RR
-#define COL_DIVIDER   0x39E7    // dark grey — static rules
-#define COL_TANK      0x6E5A    // muted teal
-#define COL_PRESET    0xE5AB    // muted amber
-#define COL_RAISING   0x7E4F    // soft green
-#define COL_LOWERING  0xE5AB    // muted amber
-#define COL_IDLE      0x738E    // grey
-#define COL_NOSIGNAL  0xD9E7    // soft red
+#define COL_VALUE     0xFC60    // vivid orange — corner pressures
+#define COL_STALE     0x69A1    // dim brownish amber — pressures held over from a lost link
+#define COL_LABEL     0x8A40    // dim amber — FL / FR / RL / RR
+#define COL_DIVIDER   0x38E0    // near-black amber-brown — static rules
+#define COL_TANK      0xFDA5    // warm amber-yellow — distinct from the corner values' orange
+#define COL_PRESET    0xFC60    // same vivid orange as COL_VALUE
+#define COL_RAISING   0x96E7    // warm green — kept distinct, this is a real status signal
+#define COL_LOWERING  0xFAC0    // warm orange-red
+#define COL_IDLE      0x5A26    // dim amber-grey
+#define COL_NOSIGNAL  0xD8A2    // red — kept distinct, this is a real fault signal
