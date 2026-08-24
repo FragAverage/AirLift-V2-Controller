@@ -27,7 +27,7 @@
 
 // --- Master / general (uncategorised) ---
 #if enableDebug && debugSys
-#define DEBUG(x, ...)  Serial.printf("[SYS] " x "\n", ##__VA_ARGS__)
+#define DEBUG(x, ...)  Serial.printf("[SYS] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_(x, ...) Serial.printf("[SYS] " x, ##__VA_ARGS__)
 #else
 #define DEBUG(x, ...)
@@ -36,7 +36,7 @@
 
 // --- [PWR] power management ---
 #if enableDebug && debugPower
-#define DEBUG_PWR(x, ...)  Serial.printf("[PWR] " x "\n", ##__VA_ARGS__)
+#define DEBUG_PWR(x, ...)  Serial.printf("[PWR] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_PWR_(x, ...) Serial.printf("[PWR] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_PWR(x, ...)
@@ -45,7 +45,7 @@
 
 // --- [WiFi] soft-AP + web server ---
 #if enableDebug && debugWifi
-#define DEBUG_WIFI(x, ...)  Serial.printf("[WiFi] " x "\n", ##__VA_ARGS__)
+#define DEBUG_WIFI(x, ...)  Serial.printf("[WiFi] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_WIFI_(x, ...) Serial.printf("[WiFi] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_WIFI(x, ...)
@@ -54,7 +54,7 @@
 
 // --- [IO] high-side / controller power / UART init ---
 #if enableDebug && debugIO
-#define DEBUG_IO(x, ...)  Serial.printf("[IO] " x "\n", ##__VA_ARGS__)
+#define DEBUG_IO(x, ...)  Serial.printf("[IO] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_IO_(x, ...) Serial.printf("[IO] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_IO(x, ...)
@@ -63,7 +63,7 @@
 
 // --- [CAN] TWAI driver + vehicle CAN ---
 #if enableDebug && debugCAN
-#define DEBUG_CAN(x, ...)  Serial.printf("[CAN] " x "\n", ##__VA_ARGS__)
+#define DEBUG_CAN(x, ...)  Serial.printf("[CAN] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_CAN_(x, ...) Serial.printf("[CAN] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_CAN(x, ...)
@@ -72,7 +72,7 @@
 
 // --- [LIN] AirLift MITM (wire / mode / buttons) ---
 #if enableDebug && debugLIN
-#define DEBUG_LIN(x, ...)  Serial.printf("[LIN] " x "\n", ##__VA_ARGS__)
+#define DEBUG_LIN(x, ...)  Serial.printf("[LIN] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_LIN_(x, ...) Serial.printf("[LIN] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_LIN(x, ...)
@@ -81,7 +81,7 @@
 
 // --- [API] REST / settings / OTA ---
 #if enableDebug && debugAPI
-#define DEBUG_API(x, ...)  Serial.printf("[API] " x "\n", ##__VA_ARGS__)
+#define DEBUG_API(x, ...)  Serial.printf("[API] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_API_(x, ...) Serial.printf("[API] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_API(x, ...)
@@ -90,7 +90,7 @@
 
 // --- [SAVVY] SavvyCAN GVRET bridge ---
 #if enableDebug && debugSavvy
-#define DEBUG_SAVVY(x, ...)  Serial.printf("[SAVVY] " x "\n", ##__VA_ARGS__)
+#define DEBUG_SAVVY(x, ...)  Serial.printf("[SAVVY] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_SAVVY_(x, ...) Serial.printf("[SAVVY] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_SAVVY(x, ...)
@@ -99,7 +99,7 @@
 
 // --- [MFL] steering-wheel cruise-button decode ---
 #if enableDebug && debugMFL
-#define DEBUG_MFL(x, ...)  Serial.printf("[MFL] " x "\n", ##__VA_ARGS__)
+#define DEBUG_MFL(x, ...)  Serial.printf("[MFL] " x "\r\n", ##__VA_ARGS__)
 #define DEBUG_MFL_(x, ...) Serial.printf("[MFL] " x, ##__VA_ARGS__)
 #else
 #define DEBUG_MFL(x, ...)

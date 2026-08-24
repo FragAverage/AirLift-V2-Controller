@@ -50,7 +50,7 @@ static void powerLog(const char *fmt, ...)
   va_start(args, fmt);
   vsnprintf(buf, sizeof(buf), fmt, args);
   va_end(args);
-  Serial.printf("[PWR] %s\n", buf);
+  Serial.printf("[PWR] %s\r\n", buf);
 }
 
 static void powerApplyLightSleep(bool enable)
