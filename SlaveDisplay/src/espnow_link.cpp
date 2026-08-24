@@ -63,6 +63,17 @@ void begin() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(false, false);  // make sure we are not chasing an AP
 
+  // Lower TX power -- this board and the master sit inches apart in the same
+  // cluster, so full power is wasted current (and board heat) for no range
+  // benefit. Same reasoning and same value the master's power_manager
+  // already uses for its own "in-car close range" TX power reduction
+  // (PlatformIO/src/power_manager.cpp's wifiTxPowerActive). Deliberately NOT
+  // touching WiFi.setSleep() here -- modem sleep trades latency/dropped
+  // packets for power savings, and this board's whole job is a low-latency
+  // live gauge reading over a broadcast link with no retransmission, so
+  // that trade isn't worth it without it actually being asked for.
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
   // ESP-NOW only works between radios parked on the same channel. Nothing here
   // ever associates, so pin the channel explicitly.
   esp_wifi_set_promiscuous(true);
