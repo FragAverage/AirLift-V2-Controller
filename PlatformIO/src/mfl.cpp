@@ -5,10 +5,21 @@
 
 namespace {
 
-// Set true if the signal reaches pinMflSignal through an inverting stage —
-// this board's optocoupler inverts (car HIGH -> LED on -> phototransistor on
-// -> GPIO pulled LOW), same as the bench build in MFL-FINDINGS.md.
-constexpr bool kSignalInverted = true;
+// Set true if the signal reaches pinMflSignal through an inverting stage.
+//
+// FALSE on this hardware. The bench build (MFL-FINDINGS.md) fed the signal
+// through a 4N35 optocoupler, which inverts. The MFSW board has no such stage:
+// the MFL wire comes in on connector pin 7 and reaches GPIO39 through the aux
+// light-sense resistive network, which is non-inverting, so the pin follows the
+// car line directly.
+//
+// Confirmed by mflDiagTick()'s phase measurement, which times both levels
+// independently of this flag: the HIGH phase carries the >5ms inter-message
+// idle gap (measured 10809us) and bottoms out at the ~168us bit width (measured
+// 166us), while LOW never exceeds ~508us. Mark = HIGH = not inverted. With this
+// set true the framing looked for the gap on LOW, never found one, and
+// s_haveSync never armed -- edges climbed but frames stayed at 0.
+constexpr bool kSignalInverted = false;
 
 constexpr uint32_t kBitThresholdUs   = 250;   // 0 vs 1 discriminator
 constexpr uint32_t kFrameGapUs       = 5000;  // idle gap => new message
@@ -30,11 +41,51 @@ volatile uint32_t s_isrEdgeCount = 0;
 volatile uint32_t s_frameCount   = 0;
 volatile int32_t  s_lastRawValue = -1;
 
+// Polarity-independent phase statistics. These measure how long the pin spends
+// HIGH and how long it spends LOW using the *raw* level, before kSignalInverted
+// is applied, so a capture can answer two questions the edge counter alone
+// can't on a front-end whose behaviour isn't known (the MFSW board's aux
+// light-sense input):
+//   - Which phase carries the >5ms inter-message idle gap? That phase is the
+//     "mark", and it fixes what kSignalInverted has to be.
+//   - Do the bit pulses survive the front-end at all? Real bits land at ~168us
+//     and ~341us; an RC-smothered or noise-only line won't show that split.
+// Reset every log interval so they describe the last window, not all of time.
+volatile uint32_t s_phaseLastUs  = 0;
+volatile bool     s_phaseLastHigh = false;
+volatile bool     s_phaseStarted = false;
+volatile uint32_t s_highMaxUs = 0;
+volatile uint32_t s_highMinUs = UINT32_MAX;
+volatile uint32_t s_highCount = 0;
+volatile uint32_t s_lowMaxUs  = 0;
+volatile uint32_t s_lowMinUs  = UINT32_MAX;
+volatile uint32_t s_lowCount  = 0;
+
 void IRAM_ATTR mflIsr() {
   s_isrEdgeCount++;
 
   const uint32_t now = micros();
-  bool isMark = digitalRead(pinMflSignal) == HIGH;
+  const bool rawHigh = digitalRead(pinMflSignal) == HIGH;
+
+  // Time the phase that just ended (its level is the one held *before* this
+  // edge, i.e. the opposite of what we just read).
+  if (s_phaseStarted) {
+    const uint32_t dur = now - s_phaseLastUs;
+    if (s_phaseLastHigh) {
+      if (dur > s_highMaxUs) s_highMaxUs = dur;
+      if (dur < s_highMinUs) s_highMinUs = dur;
+      s_highCount++;
+    } else {
+      if (dur > s_lowMaxUs) s_lowMaxUs = dur;
+      if (dur < s_lowMinUs) s_lowMinUs = dur;
+      s_lowCount++;
+    }
+  }
+  s_phaseStarted  = true;
+  s_phaseLastUs   = now;
+  s_phaseLastHigh = rawHigh;
+
+  bool isMark = rawHigh;
   if (kSignalInverted) isMark = !isMark;
 
   if (isMark) {
@@ -152,6 +203,25 @@ void mflDiagTick() {
               (unsigned long)s_isrEdgeCount, (unsigned long)s_frameCount,
               (long)s_lastRawValue, s_confirmed.plus, s_confirmed.minus,
               s_confirmed.set, s_confirmed.io);
+
+    // Snapshot-and-reset the phase stats atomically so the numbers describe
+    // the interval just elapsed.
+    uint32_t hMax, hMin, hN, lMax, lMin, lN;
+    portENTER_CRITICAL(&s_mux);
+    hMax = s_highMaxUs; hMin = s_highMinUs; hN = s_highCount;
+    lMax = s_lowMaxUs;  lMin = s_lowMinUs;  lN = s_lowCount;
+    s_highMaxUs = 0; s_highMinUs = UINT32_MAX; s_highCount = 0;
+    s_lowMaxUs  = 0; s_lowMinUs  = UINT32_MAX; s_lowCount  = 0;
+    portEXIT_CRITICAL(&s_mux);
+
+    if (hMin == UINT32_MAX) hMin = 0;
+    if (lMin == UINT32_MAX) lMin = 0;
+    DEBUG_MFL("phase: level=%s HIGH n=%lu %lu..%luus | LOW n=%lu %lu..%luus"
+              "  (mark phase should reach >%luus)",
+              digitalRead(pinMflSignal) == HIGH ? "HIGH" : "LOW",
+              (unsigned long)hN, (unsigned long)hMin, (unsigned long)hMax,
+              (unsigned long)lN, (unsigned long)lMin, (unsigned long)lMax,
+              (unsigned long)kFrameGapUs);
   }
 
   // Also mirrored into the persisted event log (visible over the web UI,
