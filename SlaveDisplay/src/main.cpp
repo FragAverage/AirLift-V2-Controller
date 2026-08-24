@@ -63,6 +63,12 @@ void setup() {
   delay(200);
   Serial.println("\n[SYS] AirLift V2 slave display booting");
 
+  // Loads persisted settings (ROTATE 180) from NVS -- must run before
+  // display::begin() so each board's initial panel rotation is already known
+  // at init time rather than only taking effect the next time the menu is
+  // opened.
+  menu::begin();
+
   display::begin();
 
   // Bring the radio up before the splash blocks: packets that arrive during

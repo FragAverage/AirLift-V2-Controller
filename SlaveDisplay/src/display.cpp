@@ -127,7 +127,12 @@ void begin() {
 #endif
 
   tft.init();
-  tft.setRotation(TFT_ROTATION);
+  // TFT_eSPI rotation IDs 0-3 come in landscape/portrait pairs 180 degrees
+  // apart (0<->2, 1<->3) -- XOR-ing the board's base TFT_ROTATION with 2
+  // flips to the other member of its pair, i.e. the same physical mounting
+  // orientation upside down. menu::begin() (called before display::begin()
+  // in main.cpp) has already loaded the persisted value by this point.
+  tft.setRotation(menu::rotate180() ? (TFT_ROTATION ^ 2) : TFT_ROTATION);
   tft.fillScreen(COL_BG);
   tft.setTextDatum(TL_DATUM);
 
@@ -381,6 +386,15 @@ void drawManualActive(const menu::View& view) {
 }
 
 }  // namespace
+
+void setRotate180(bool on) {
+  tft.setRotation(on ? (TFT_ROTATION ^ 2) : TFT_ROTATION);
+  // Whatever's already on the glass is now upside down relative to the new
+  // orientation -- force both diff caches to repaint in full next time,
+  // same trick main.cpp's GAUGE<->MENU transition already relies on.
+  primed     = false;
+  menuPrimed = false;
+}
 
 void drawMenu(const menu::View& view, bool force) {
   if (!force && !menuViewChanged(view)) return;

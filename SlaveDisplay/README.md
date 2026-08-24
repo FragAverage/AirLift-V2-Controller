@@ -1,8 +1,9 @@
 # AirLift V2 — Slave Display
 
 Gauge-cluster dashboard for the AirLift V2 MITM controller, with an
-MFL-button-driven on-screen menu (see "MFL menu" below). Four boards share
-this firmware as separate PlatformIO envs:
+MFL-button-driven on-screen menu (see "MFL menu" below). Five boards (seven
+PlatformIO envs — `round21` and `lcd147` each have an LVGL alternate build)
+share this firmware:
 
 - **`cyd`** (default) — **ESP32-2432S028R** ("Cheap Yellow Display"): 2.8"
   ILI9341 320×240 + XPT2046 resistive touch. TFT_eSPI.
@@ -12,10 +13,22 @@ this firmware as separate PlatformIO envs:
   round panel driven over the ESP32-S3's RGB-parallel LCD peripheral (not
   SPI) + CST820 capacitive touch, both gated through a TCA9554 I2C IO
   expander. Arduino_GFX — see "The round21 board" below for why.
+- **`round21_lvgl`** — the same physical `round21` board/panel, rendered
+  with LVGL widgets instead of Arduino_GFX draw calls. Same on-screen layout
+  as `round21` on purpose; an alternate build, not a fallback — see "The
+  round21 board" below.
 - **`oled13`** — generic ESP32-S3 devkit + 1.3" SH1106 128×64 monochrome
   OLED, I2C. The intended **production screen size** — no touch hardware at
   all, every input is the MFL menu. Adafruit_SH110X — see "The oled13 board"
   below.
+- **`lcd147`** — **Waveshare ESP32-S3-LCD-1.47B**: 172×320 ST7789 SPI panel,
+  rotated to a 320×172 landscape canvas, no touch hardware. TFT_eSPI, shares
+  `display.cpp`/`touch.cpp` with `cyd`/`round128`.
+- **`lcd147_lvgl`** — the same physical `lcd147` board/panel, rendered with
+  LVGL widgets instead of raw TFT_eSPI draw calls. Unlike `round21_lvgl`,
+  TFT_eSPI stays in the picture (this panel's ST7789 is already well
+  supported by it) — see "`lcd147_lvgl`: the same board, rendered with
+  LVGL" below.
 
 The master broadcasts `AirLiftData` (pressures/preset/status) and
 `AirLiftButtons` (live MFL button state) over ESP-NOW; the unit renders them
@@ -40,6 +53,23 @@ other two, just against a different rendering backend — `main.cpp` and the
 ESP-NOW receive layer (`espnow_link.cpp`) don't know or care which board
 they're running on.
 
+`round21_lvgl` is a second display backend for that same board/panel,
+`display_round21_lvgl.cpp`, built from LVGL widgets instead of Arduino_GFX
+draw calls — same `display::` interface, same 2x2-grid/strip/status-bar
+layout, `main.cpp` no more aware of it than of any other board. It shares
+`panel_round21.cpp` (the ST7701/RGB-peripheral bring-up) and
+`touch_round21.cpp` verbatim with `env:round21` — only the rendering backend
+and `lib_deps` differ. See "The round21 board" below.
+
+`lcd147`, unlike `round21`, *can* share `display.cpp`/`touch.cpp` with
+`cyd`/`round128` — its ST7789 panel is a normal TFT_eSPI-supported SPI part,
+just rotated to a 320×172 landscape canvas (`BOARD_LCD147` in `config.h`).
+`lcd147_lvgl` is its LVGL alternate build (`display_lcd147_lvgl.cpp`), same
+relationship to `lcd147` as `round21_lvgl` has to `round21` — but since
+TFT_eSPI already works fine for this panel, LVGL sits on top of it rather
+than replacing it: TFT_eSPI still does panel bring-up, LVGL's flush callback
+just calls `tft.pushImage()`. `touch.cpp` is shared unchanged by both.
+
 ```
   0                160               319
   +--------------------+--------------------+   0
@@ -62,8 +92,11 @@ they're running on.
 ```bash
 pio run                       # build the default env (cyd)
 pio run -e round128           # build the 1.28" round panel
-pio run -e round21            # build the 2.1" round panel
+pio run -e round21            # build the 2.1" round panel (Arduino_GFX)
+pio run -e round21_lvgl       # build the 2.1" round panel (LVGL)
 pio run -e oled13             # build the 1.3" OLED (production size)
+pio run -e lcd147             # build the 1.47" landscape panel (TFT_eSPI)
+pio run -e lcd147_lvgl        # build the 1.47" landscape panel (LVGL)
 pio run -e round128 -t upload # flash over USB
 pio device monitor -e round128 --baud 115200
 ```
@@ -90,7 +123,8 @@ wired. `round21` doesn't use TFT_eSPI at all, so this doesn't apply to it.
 | `ENABLE_TOUCH` | `0` | Compiles in the tap zones. Off because the unit is cluster-mounted. |
 | `DEMO_MODE` | `0` | Animates fake pressures so the panel can be tested with no master present. |
 | `DISPLAY_ROUND` | *(unset on `cyd`, `1` on `round128`)* | Selects `round128`'s pins/geometry/touch driver in `config.h`. Not something you set by hand — it's baked into that env's `build_flags`. |
-| `BOARD_ROUND21` | *(unset elsewhere, `1` on `round21`)* | Selects `round21`'s pins/geometry/touch driver in `config.h`. Also baked into that env's `build_flags`. |
+| `BOARD_ROUND21` | *(unset elsewhere, `1` on `round21` and `round21_lvgl`)* | Selects the round21 board's pins/geometry/touch driver in `config.h` — same for both display backends, this is a rendering-backend swap, not a different board. Also baked into each env's `build_flags`. |
+| `BOARD_LCD147` | *(unset elsewhere, `1` on `lcd147` and `lcd147_lvgl`)* | Selects the lcd147 board's landscape geometry in `config.h` — same for both display backends. Also baked into each env's `build_flags`. |
 
 ## Round panel (`round128`)
 
@@ -194,6 +228,47 @@ into it is just a RAM store with no transfer-time flicker to hide. The
 diffed-redraw cache (skip repainting a box whose text didn't change) is kept
 anyway, purely to save CPU at the ~10 Hz update rate.
 
+### `round21_lvgl`: the same board, rendered with LVGL
+
+Same physical board/panel as `round21` above, same on-screen layout, same
+`display::` interface — only the rendering backend differs
+(`display_round21_lvgl.cpp`, `lvgl/lvgl @ ^9.5.0` instead of Arduino_GFX).
+An alternate build meant to be compared against the known-working `round21`
+env, not a replacement for it — both stay buildable.
+
+`panel_round21.cpp`/`.h` holds the ST7701/RGB-peripheral bring-up (TCA9554
+power/reset sequencing, the byte-for-byte-ported init registers,
+`rgbPanelInit()`, backlight PWM) that both `display_round21.cpp` and
+`display_round21_lvgl.cpp` call into — split out specifically so that
+unverified-on-glass panel bring-up exists exactly once rather than being
+duplicated across backends. `touch_round21.cpp` and `tca9554.cpp` are reused
+completely unchanged by `round21_lvgl` too.
+
+LVGL's flush callback draws straight into the panel via
+`esp_lcd_panel_draw_bitmap()` against `panel_round21::handle()` — the same
+ESP-IDF call the Arduino_GFX backend uses, just handed a whole flushed
+rect at once (LVGL's own `LV_DISPLAY_RENDER_MODE_PARTIAL` draw buffers,
+plain heap `malloc`, not PSRAM) instead of per-pixel/per-line calls.
+`main.cpp` has no idea LVGL exists — `update()`/`drawMenu()` each start by
+calling a small `pumpLvgl()` helper (`lv_tick_inc()` + `lv_timer_handler()`)
+so LVGL's own timing actually advances on `main.cpp`'s ~10ms loop cadence.
+
+Config lives in `include/lv_conf.h`, picked up via the `round21_lvgl` env's
+`-D LV_CONF_INCLUDE_SIMPLE=1` build flag — same "config via build flags,
+library folder never edited" convention as this project's TFT_eSPI
+`USER_SETUP_LOADED` flags. That env also needs an explicit `-I include` build
+flag: `LV_CONF_INCLUDE_SIMPLE`'s `#include "lv_conf.h"` is a quote-include,
+and PlatformIO does not put this project's `include/` directory on a
+*library's own* source files' include path (only its `-D` build flags reach
+them, confirmed via `pio run -v`) — without `-I include`, LVGL's `.c` files
+silently fall back to their own defaults instead of this project's `lv_conf.h`.
+
+One deliberate visual deviation from `round21`: the MFL menu's
+`MANUAL_ACTIVE` direction indicator is LVGL's bundled `LV_SYMBOL_UP`/
+`LV_SYMBOL_DOWN`/`LV_SYMBOL_MINUS` glyphs instead of a hand-drawn filled
+triangle — LVGL has no filled-polygon primitive as cheap as a symbol glyph.
+Untested on real hardware, same caveat as the panel bring-up above.
+
 ## The oled13 board (`oled13`)
 
 Generic ESP32-S3 devkit + 1.3" SH1106 128×64 monochrome OLED, I2C — the
@@ -235,9 +310,64 @@ No PSRAM needed (the whole SH1106 framebuffer is 128×64/8 = 1KB), so unlike
 same native-USB `ARDUINO_USB_CDC_ON_BOOT` requirement `round21` has (see that
 section above).
 
+## The lcd147 board (`lcd147`)
+
+Waveshare ESP32-S3-LCD-1.47B: ST7789 172×320 SPI panel (write-only, no MISO
+wired — same as `round128`'s GC9A01), rotated to a 320×172 landscape canvas
+(`TFT_ROTATION` in `config.h`'s `BOARD_LCD147` block), no touch hardware.
+Also has an onboard QMI8658 six-axis IMU, TF/SD slot, and an addressable RGB
+LED, none of which this firmware uses (the LED is explicitly written off at
+boot — see `display::begin()` — since it otherwise powers up showing an
+undefined colour).
+
+Unlike `round21`, this panel's ST7789 already has full working TFT_eSPI
+support, so `lcd147` shares `display.cpp`/`touch.cpp` with `cyd`/`round128`
+same as `round128` does — no board-specific display/touch files needed.
+
+One real hardware quirk: **the backlight is not software-controlled on this
+board.** GPIO46 (this board's `TFT_BL` pin per Waveshare's own pin table) is
+the one genuinely input-only GPIO on the ESP32-S3 — it cannot drive PWM or
+any digital output at all, confirmed at runtime (`ledcAttach`/`digitalWrite`
+both error `"IO 46 is not set as GPIO"` despite the panel itself working
+fine). The backlight is evidently hard-wired always-on, so `setBacklight()`
+is a no-op on this board specifically (`#ifdef BOARD_LCD147` in
+`display.cpp`) — every other board's PWM fade-up in `splash()` simply has no
+visible effect here.
+
+### `lcd147_lvgl`: the same board, rendered with LVGL
+
+Same physical board/panel as `lcd147` above, same on-screen layout, same
+`display::` interface — only the rendering backend differs
+(`display_lcd147_lvgl.cpp`, adding `lvgl/lvgl @ ^9.5.0` to `lib_deps`
+alongside TFT_eSPI, not instead of it). An alternate build meant to be
+compared against the known-working `lcd147` env, not a replacement for it —
+both stay buildable. See "The round21 board" above for the general
+LVGL-backend approach (draw buffers, `pumpLvgl()`, the DSEG7 retro digit
+font) this env follows too — the one thing genuinely different here:
+
+**TFT_eSPI stays in the picture**, unlike `round21_lvgl`. `round21_lvgl`
+talks to the panel directly via `esp_lcd_panel_draw_bitmap()` because
+TFT_eSPI has *no* working ST7701-RGB driver at all; that's not true here —
+this panel's ST7789 is a completely ordinary TFT_eSPI-supported SPI part, so
+bypassing it would just be reinventing well-tested panel bring-up for no
+reason. LVGL's flush callback is a single `tft.pushImage()` call per
+flushed rect — the standard, common LVGL+TFT_eSPI integration pattern.
+`touch.cpp` is reused unchanged (this board has no touch hardware either
+way, same as `lcd147`).
+
+`config.h`'s `BOARD_LCD147` block also carries this backend's font-size
+macros (`VALUE_FONT_PX_CORNER`/`VALUE_FONT_PX_STRIP`/etc.), sized for this
+board's much shorter cells than round21's (`CELL_VALUE_H`=28,
+`STRIP_VALUE_H`=22 here vs. 56/44 there) — the corner/manual-adjust DSEG7
+digit font is 22px here (`font_dseg7_22`) and the tank digit font 16px
+(`font_dseg7_16`), both in `lib/dseg7_font/` alongside round21_lvgl's 48px/
+28px ones. Untested on real hardware (no `lcd147` unit was available to
+flash when this was built) — same caveat as everything else in this repo
+flagged "unverified against real glass."
+
 ## Wi-Fi channel
 
-Applies to all four boards. ESP-NOW only works between radios parked on the
+Applies to every board. ESP-NOW only works between radios parked on the
 same channel, and this end never associates with anything, so the channel is
 pinned explicitly at boot. If the
 master is running its SoftAP (web UI) on a channel other than 1, set
@@ -328,10 +458,12 @@ there's no meaningful SPI/redraw cost to save by diffing it.
 
 ## Touch (`ENABLE_TOUCH=1`)
 
-Applies to `cyd`/`round128`/`round21` only — `oled13` has no touch hardware
-at all, `touch_oled13.cpp` is an unconditional stub, and every input on that
-board is the MFL menu instead. Tap-zone logic is the same shape on the other
-three boards (`dispatch()`, in whichever `touch*.cpp` the env compiles): the
+Applies to `cyd`/`round128`/`round21`/`round21_lvgl` only — `oled13` and
+`lcd147`/`lcd147_lvgl` have no touch hardware at all (`touch_oled13.cpp` and,
+on those two lcd147 envs, `touch.cpp`'s `#if ENABLE_TOUCH` stub branch, are
+unconditional no-ops), and every input on those boards is the MFL menu
+instead. Tap-zone logic is the same shape on the other three boards
+(`dispatch()`, in whichever `touch*.cpp` the env compiles): the
 four corner quadrants, and preset down / preset up on the left / right of
 the tank-preset strip, driven by that env's `GRID_X0/Y0`/`CELL_W`/`CELL_H`
 geometry. Each hit currently just does a `Serial.printf` — the actual
@@ -356,19 +488,25 @@ front ends differ:
 
 | File | Contents |
 | --- | --- |
-| `include/config.h` | Per-board pins + layout geometry (`DISPLAY_ROUND`/`BOARD_ROUND21`/`BOARD_OLED13`-gated), colours, timeouts |
+| `include/config.h` | Per-board pins + layout geometry (`DISPLAY_ROUND`/`BOARD_ROUND21`/`BOARD_OLED13`/`BOARD_LCD147`-gated), colours, timeouts |
 | `include/airlift_espnow.h` | The shared wire structs (`AirLiftData`, `AirLiftButtons`, `AirLiftCommand`) — **keep in sync with the master** |
 | `src/espnow_link.cpp` | STA mode, fixed channel, receive callback (`AirLiftData` + `AirLiftButtons`), `sendCommand()` — shared, board-agnostic |
 | `include/menu.h` / `src/menu.cpp` | MFL-button-driven menu state machine (edge detection, screens, cursor) — shared, board-agnostic, rendering-agnostic |
-| `src/display.cpp` | `cyd`/`round128` (TFT_eSPI): static layout + diffed value rendering + `drawMenu()`, driven entirely by `config.h` |
-| `src/touch.cpp` | `cyd`/`round128`: tap-zone dispatch; XPT2046 (CYD, VSPI) or CST816T (round128, I2C) front end |
-| `src/display_round21.cpp` | `round21` (Arduino_GFX): ST7701 init, RGB panel bring-up, `Arduino_ST7701` GFX subclass, layout + diffed rendering + `drawMenu()` |
-| `src/touch_round21.cpp` | `round21`: tap-zone dispatch + CST820 front end |
-| `src/tca9554.cpp` | `round21`: TCA9554 I2C IO-expander driver (panel reset/CS/power, touch reset) |
+| `src/display.cpp` | `cyd`/`round128`/`lcd147` (TFT_eSPI): static layout + diffed value rendering + `drawMenu()`, driven entirely by `config.h` |
+| `src/touch.cpp` | `cyd`/`round128`/`lcd147`/`lcd147_lvgl`: tap-zone dispatch; XPT2046 (CYD, VSPI), CST816T (round128, I2C), or no-op stub (lcd147 has no touch hardware) |
+| `src/panel_round21.cpp` | `round21` + `round21_lvgl`: shared ST7701 init + RGB panel bring-up + backlight PWM, used by both display backends |
+| `src/display_round21.cpp` | `round21` (Arduino_GFX): `Arduino_ST7701` GFX subclass over `panel_round21`, layout + diffed rendering + `drawMenu()` |
+| `src/display_round21_lvgl.cpp` | `round21_lvgl` (LVGL): flush callback over `panel_round21`, LVGL widget layout + `drawMenu()`, 48px/28px DSEG7 digit fonts |
+| `src/touch_round21.cpp` | `round21` + `round21_lvgl`: tap-zone dispatch + CST820 front end, shared unchanged by both |
+| `src/tca9554.cpp` | `round21` + `round21_lvgl`: TCA9554 I2C IO-expander driver (panel reset/CS/power, touch reset) |
 | `src/display_oled13.cpp` | `oled13` (Adafruit_SH110X): I2C bring-up (with address fallback + bus scan on failure), compact big-value layout + `drawMenu()` |
 | `src/touch_oled13.cpp` | `oled13`: unconditional no-op stub — no touch hardware on this board |
+| `src/display_lcd147_lvgl.cpp` | `lcd147_lvgl` (LVGL over TFT_eSPI): flush callback via `tft.pushImage()`, LVGL widget layout + `drawMenu()`, 22px/16px DSEG7 digit fonts |
+| `include/lv_conf.h` | `round21_lvgl` + `lcd147_lvgl`: shared LVGL config, picked up via each env's `-D LV_CONF_INCLUDE_SIMPLE=1`/`-I include` build flags |
+| `lib/dseg7_font/` | `round21_lvgl` + `lcd147_lvgl`: DSEG7 Classic Bold (SIL OFL) converted to LVGL fonts at 48/28/22/16px — see "The round21 board" above |
 | `src/main.cpp` | Boot, loop (menu vs. gauge branch), preset names — shared, board-agnostic |
 
-Each env's `build_src_filter` in `platformio.ini` picks the right pair of
-`display*`/`touch*` files and excludes `tca9554.cpp` on the boards that
-don't have one.
+Each env's `build_src_filter` in `platformio.ini` picks the right
+`display*`/`touch*` files for its own backend and excludes every other
+backend's board-specific files (`tca9554.cpp`/`panel_round21.cpp` on boards
+that don't have that hardware, the other board's `display_*_lvgl.cpp`, etc).

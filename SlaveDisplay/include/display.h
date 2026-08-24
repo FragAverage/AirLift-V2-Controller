@@ -12,6 +12,17 @@ void begin();
 // car's dip-beam/illumination signal for a night setting.
 void setBacklight(uint8_t percent);
 
+// Flips the panel 180 degrees for an upside-down mount -- Settings -> ROTATE
+// 180 (see menu.cpp), persisted in NVS (menu::rotate180()) so it survives a
+// power cycle. begin() applies whatever menu::rotate180() already reports at
+// boot (menu::begin() must run first — see main.cpp); this is the live
+// setter menu.cpp calls the moment the toggle changes, so the screen flips
+// immediately without needing a reboot. Also resets each backend's own
+// gauge/menu diff caches, since a rotation change invalidates whatever is
+// already drawn on the physical glass the same way a GAUGE<->MENU mode
+// switch does.
+void setRotate180(bool on);
+
 #ifdef BOARD_OLED13
 // SH1106 pixel-swap invert, confirmed visible on real hardware -- OLED13
 // only, exposed as a Settings toggle alongside BACKLIGHT (see menu.cpp).

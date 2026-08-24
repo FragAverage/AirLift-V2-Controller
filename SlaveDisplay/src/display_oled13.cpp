@@ -202,6 +202,13 @@ void begin() {
     Serial.println("[OLED] init OK");
   }
 
+  // Adafruit_GFX's setRotation() is a pure software coordinate transform,
+  // same family/mechanism as Arduino_GFX's (see display_round21.cpp) -- 0/2
+  // are a normal/180-flipped pair, same convention as TFT_eSPI's rotation
+  // IDs. menu::begin() (called before display::begin() in main.cpp) has
+  // already loaded the persisted value.
+  oled.setRotation(menu::rotate180() ? 2 : 0);
+
   oled.clearDisplay();
   oled.setContrast(0);
   oled.display();
@@ -386,6 +393,15 @@ void drawManualActive(const menu::View& view) {
 }
 
 }  // namespace
+
+void setRotate180(bool on) {
+  oled.setRotation(on ? 2 : 0);
+  // Whatever's already in the (RAM) framebuffer is now upside down relative
+  // to the new orientation -- force both diff caches to repaint in full next
+  // time, same trick main.cpp's GAUGE<->MENU transition already relies on.
+  primed     = false;
+  menuPrimed = false;
+}
 
 void drawMenu(const menu::View& view, bool force) {
   if (!force && !menuViewChanged(view)) return;

@@ -3,7 +3,8 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Five boards share this firmware:
+// Five boards (seven envs -- round21 and lcd147 each have two
+// rendering-backend variants) share this firmware:
 //
 //   - ESP32-2432S028R "Cheap Yellow Display" (default) — ILI9341 320x240
 //     landscape + XPT2046 resistive touch on its own SPI bus. Rendered with
@@ -15,9 +16,11 @@
 //     ST7701 480x480 round panel driven over the ESP32-S3's RGB-parallel LCD
 //     peripheral (not SPI), reset/CS/power gated through a TCA9554 I2C IO
 //     expander, CST820 capacitive touch on I2C. TFT_eSPI has no working
-//     ST7701-RGB support, so this board uses Arduino_GFX instead and gets its
-//     own implementation: src/display_round21.cpp, src/touch_round21.cpp,
-//     src/tca9554.cpp.
+//     ST7701-RGB support. Panel bring-up (src/panel_round21.cpp) is shared
+//     by two rendering backends: env:round21 (Arduino_GFX --
+//     src/display_round21.cpp) and env:round21_lvgl (LVGL --
+//     src/display_round21_lvgl.cpp, include/lv_conf.h), both using
+//     src/touch_round21.cpp and src/tca9554.cpp unchanged.
 //   - Generic ESP32-S3 devkit + 1.3" SH1106 128x64 monochrome OLED, I2C
 //     (build flag BOARD_OLED13=1) — the intended production screen size.
 //     Adafruit_SH110X, own implementation: src/display_oled13.cpp,
@@ -26,9 +29,14 @@
 //     SH1106's contrast register instead of PWM.
 //   - Waveshare ESP32-S3-LCD-1.47B (build flag BOARD_LCD147=1) — ST7789
 //     172x320 SPI panel, rotated to a 320x172 landscape canvas, no touch
-//     hardware. Also TFT_eSPI, shares src/display.cpp and src/touch.cpp
-//     (ENABLE_TOUCH=0 makes touch.cpp compile to a no-op stub) with the CYD
-//     and round128 boards above.
+//     hardware. Two rendering backends, both using this board's ST7789
+//     TFT_eSPI config as-is (unlike round21, TFT_eSPI already has working
+//     support for this panel, so there was no reason to bypass it for the
+//     LVGL backend): env:lcd147 (raw TFT_eSPI draw calls --
+//     src/display.cpp, shared with cyd/round128) and env:lcd147_lvgl (LVGL
+//     -- src/display_lcd147_lvgl.cpp, include/lv_conf.h). src/touch.cpp
+//     (ENABLE_TOUCH=0 makes it compile to a no-op stub) is shared unchanged
+//     by both.
 //
 // platformio.ini's build_src_filter keeps each env compiling only its own
 // display/touch files. Panel SPI pins for the two TFT_eSPI boards live in
@@ -254,6 +262,19 @@
 #define LABEL_TEXTSIZE         2
 #define STATUS_TEXTSIZE         3
 
+// Same sizing intent as the VALUE_TEXTSIZE_*/LABEL_TEXTSIZE/STATUS_TEXTSIZE
+// macros above, expressed in px instead of an Arduino_GFX integer scale --
+// LVGL's bundled fonts (display_round21_lvgl.cpp, the round21_lvgl env only)
+// are fixed sizes, not a scale factor, so that backend maps each of these to
+// the nearest enabled lv_font_montserrat_*. Unused by the Arduino_GFX
+// round21 build; kept here rather than in a backend-specific header since
+// this is geometry, same as every other constant in this file.
+#define VALUE_FONT_PX_CORNER 48
+#define VALUE_FONT_PX_STRIP  28
+#define LABEL_FONT_PX        20
+#define STATUS_FONT_PX        28
+#define TITLE_FONT_PX          28
+
 #define SPLASH_HANDLE_TEXTSIZE 4
 #define SPLASH_Y_HANDLE        200
 #define SPLASH_Y_RULE          248
@@ -355,6 +376,18 @@
 // digits-only) — Font 4 (26px) is the proven fit at a similar cell height.
 #define VALUE_FONT_CORNER 4
 #define VALUE_FONT_STRIP  4
+
+// Same sizing intent as VALUE_FONT_CORNER/VALUE_FONT_STRIP above, in px
+// instead of a TFT_eSPI font ID -- lcd147_lvgl (display_lcd147_lvgl.cpp)
+// maps these to DSEG7 (corner/strip digits) or the nearest enabled
+// lv_font_montserrat_* (everything else). Sized to this board's much
+// shorter cells than round21's (CELL_VALUE_H=28, STRIP_VALUE_H=22 here vs.
+// 56/44 there) -- unused, harmless macros in the non-LVGL lcd147 build.
+#define VALUE_FONT_PX_CORNER 22
+#define VALUE_FONT_PX_STRIP  16
+#define LABEL_FONT_PX        14
+#define STATUS_FONT_PX        16
+#define TITLE_FONT_PX          20
 
 // Splash text, compact for this panel's short 172px canvas. Y values are
 // MC_DATUM centres (see display.cpp's splash()) -- vertically centred so

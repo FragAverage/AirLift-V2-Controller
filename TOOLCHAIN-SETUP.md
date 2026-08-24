@@ -89,10 +89,13 @@ core's bundled WiFi/SPI/Wire)
 | `round128` | TFT_eSPI (bodmer) | 2.5.43 |
 | `round128` | CST816S (fbiego) | 1.3.0 |
 | `round21` | GFX Library for Arduino (moononournation) | 1.6.7 |
+| `round21_lvgl` | lvgl/lvgl | 9.5.0 |
 | `oled13` | Adafruit SH110X | 2.1.15 |
 | `oled13` | Adafruit GFX Library | 1.12.6 |
 | `oled13` | Adafruit BusIO | 1.17.4 |
 | `lcd147` | TFT_eSPI (bodmer) | 2.5.43 |
+| `lcd147_lvgl` | TFT_eSPI (bodmer) | 2.5.43 |
+| `lcd147_lvgl` | lvgl/lvgl | 9.5.0 |
 
 **`test/*` bench rigs** — `can_sniffer`, `mfl_sniffer`, `stepper_sweep` use
 only core libraries (WiFi, esp_now, esp_wifi, driver/twai), no extra
@@ -106,8 +109,10 @@ only core libraries (WiFi, esp_now, esp_wifi, driver/twai), no extra
 | `SlaveDisplay` `cyd` | `esp32dev` | CH340-style bridge | **460800** (pinned — this board's CH340 drops the esptool stub handshake at the default 921600) | — |
 | `SlaveDisplay` `round128` | `esp32-s3-devkitc-1` | native USB (`cu.usbmodem*`) | 921600 | `board_upload.flash_size=16MB`, `board_build.flash_mode=qio` |
 | `SlaveDisplay` `round21` | `esp32-s3-devkitc-1` | native USB | 921600 | qio_opi PSRAM config — see platformio.ini comments |
+| `SlaveDisplay` `round21_lvgl` | `esp32-s3-devkitc-1` | native USB | 921600 | Same qio_opi PSRAM config as `round21` — LVGL rendering backend, same board |
 | `SlaveDisplay` `oled13` | `esp32-s3-devkitc-1` | native USB | 921600 | — |
 | `SlaveDisplay` `lcd147` | `esp32-s3-devkitc-1` | native USB | 921600 | `board_upload.flash_size=16MB`, `board_build.flash_mode=qio` |
+| `SlaveDisplay` `lcd147_lvgl` | `esp32-s3-devkitc-1` | native USB | 921600 | Same flash settings as `lcd147` — LVGL rendering backend, same board |
 | `test/can_sniffer`, `test/mfl_sniffer` | `esp32dev` | CH340-style bridge | default | — |
 | `test/stepper_sweep` | `esp32-s3-devkitc-1` | native USB | 115200 | — |
 

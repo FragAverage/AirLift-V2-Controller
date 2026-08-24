@@ -1,5 +1,6 @@
 #include "menu.h"
 
+#include <Preferences.h>
 #include <WiFi.h>
 
 #include "airlift_espnow.h"
@@ -12,6 +13,14 @@ namespace {
 
 Mode    s_mode   = Mode::GAUGE;
 uint8_t s_cursor = 0;
+
+// NVS-backed settings -- currently just ROTATE 180 (see rotate180()/begin()
+// below). Opened once for the app's lifetime rather than begin()/end() on
+// every read+write; this is the only thing on this device using the NVS
+// "airlift" namespace, so there's no contention to worry about.
+Preferences s_prefs;
+constexpr const char* kPrefsNamespace  = "airlift";
+constexpr const char* kPrefRotate180   = "rot180";
 
 // Last-seen button bitmask, for edge detection — AirLiftButtons is a state
 // broadcast, not discrete press/release events (see airlift_espnow.h), so
@@ -29,23 +38,31 @@ uint32_t           s_lastActivityMs  = 0;
 // BACKLIGHT_PCT on reboot.
 uint8_t s_backlightPct = BACKLIGHT_PCT;
 
+// Unlike BACKLIGHT/INVERT above, this one IS persisted (see begin()/onPress()
+// below) -- a physically upside-down mount is a fixed, one-time-per-install
+// fact about the hardware, not something worth re-choosing after every power
+// cycle the way a brightness preference might be.
+bool s_rotate180 = false;
+
 const char*      kTopItems[]     = {"PRESETS", "MANUAL", "SETTINGS"};
 constexpr uint8_t kTopItemCount  = 3;
 
 // oled13 additionally exposes an INVERT toggle (confirmed visible on real
 // hardware, unlike the DC-DC pump register tried earlier) alongside
 // BACKLIGHT -- the other boards keep the plain single-value BACKLIGHT item
-// they've always had. ABOUT (firmware version / MAC / link status) is last
-// on every board.
+// they've always had. ROTATE 180 and ABOUT (firmware version / MAC / link
+// status) are last on every board.
 #ifdef BOARD_OLED13
-const char*      kSettingsItems[]     = {"BACKLIGHT", "INVERT", "ABOUT"};
-constexpr uint8_t kSettingsItemCount  = 3;
-constexpr uint8_t kSettingsAboutIndex = 2;
+const char*      kSettingsItems[]      = {"BACKLIGHT", "INVERT", "ROTATE 180", "ABOUT"};
+constexpr uint8_t kSettingsItemCount   = 4;
+constexpr uint8_t kSettingsRotateIndex = 2;
+constexpr uint8_t kSettingsAboutIndex  = 3;
 bool s_invertOn = false;  // not persisted, resets to OFF on reboot
 #else
-const char*      kSettingsItems[]     = {"BACKLIGHT", "ABOUT"};
-constexpr uint8_t kSettingsItemCount  = 2;
-constexpr uint8_t kSettingsAboutIndex = 1;
+const char*      kSettingsItems[]      = {"BACKLIGHT", "ROTATE 180", "ABOUT"};
+constexpr uint8_t kSettingsItemCount   = 3;
+constexpr uint8_t kSettingsRotateIndex = 1;
+constexpr uint8_t kSettingsAboutIndex  = 2;
 #endif
 
 // MANUAL axle select (FRONT/REAR move both corners of that axle together,
@@ -129,21 +146,27 @@ void onPress(uint8_t bit) {
 
     case Mode::SETTINGS:
       // PLUS/MINUS move the cursor like any other list; IO enters
-      // BACKLIGHT's edit submode, opens ABOUT, or (OLED13 only) toggles
-      // INVERT immediately (a boolean doesn't need its own submode).
+      // BACKLIGHT's edit submode, opens ABOUT, toggles ROTATE 180 (persisted
+      // immediately), or (OLED13 only) toggles INVERT -- the last two are
+      // booleans, so neither needs its own submode.
       if (bit == MFL_BIT_PLUS)       moveCursor(-1, kSettingsItemCount);
       else if (bit == MFL_BIT_MINUS) moveCursor(1, kSettingsItemCount);
       else if (bit == MFL_BIT_IO) {
         if (s_cursor == 0) {
           s_mode = Mode::SETTINGS_BACKLIGHT;
+        } else if (s_cursor == kSettingsRotateIndex) {
+          s_rotate180 = !s_rotate180;
+          s_prefs.putBool(kPrefRotate180, s_rotate180);
+          display::setRotate180(s_rotate180);
         } else if (s_cursor == kSettingsAboutIndex) {
           s_mode = Mode::ABOUT;
+        }
 #ifdef BOARD_OLED13
-        } else {
+        else {
           s_invertOn = !s_invertOn;
           display::setInvert(s_invertOn);
-#endif
         }
+#endif
       } else if (bit == MFL_BIT_SET) {
         enterTop();
       }
@@ -219,6 +242,11 @@ void handleManualActive(uint8_t current, uint8_t pressedNow) {
 
 }  // namespace
 
+void begin() {
+  s_prefs.begin(kPrefsNamespace, false);
+  s_rotate180 = s_prefs.getBool(kPrefRotate180, false);
+}
+
 void poll() {
   AirLiftButtons b;
   if (!espnow::takeButtons(b)) return;
@@ -289,6 +317,10 @@ View currentView(const AirLiftData& liveData) {
       snprintf(buf1, sizeof(buf1), "%s %s", kSettingsItems[1], s_invertOn ? "ON" : "OFF");
       v.items[1] = buf1;
 #endif
+      static char bufRotate[16];
+      snprintf(bufRotate, sizeof(bufRotate), "%s %s",
+               kSettingsItems[kSettingsRotateIndex], s_rotate180 ? "ON" : "OFF");
+      v.items[kSettingsRotateIndex] = bufRotate;
       v.items[kSettingsAboutIndex] = kSettingsItems[kSettingsAboutIndex];
       break;
     }
@@ -344,5 +376,7 @@ View currentView(const AirLiftData& liveData) {
 }
 
 uint8_t currentBacklightPct() { return s_backlightPct; }
+
+bool rotate180() { return s_rotate180; }
 
 }  // namespace menu

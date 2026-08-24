@@ -19,6 +19,12 @@
 // ---------------------------------------------------------------------------
 namespace menu {
 
+// Loads persisted settings (currently just ROTATE 180 -- see rotate180()
+// below) from NVS via the ESP32 Preferences library. Call once from
+// main.cpp's setup(), before display::begin(), so the initial rotation is
+// already known when each board applies it at panel init.
+void begin();
+
 // SETTINGS_BACKLIGHT: OLED13-only edit submode entered from the SETTINGS
 // list when BACKLIGHT is selected (see menu.cpp) -- PLUS/MINUS adjust the
 // value live, SET/IO returns to the SETTINGS list. Unreachable on the other
@@ -67,5 +73,13 @@ View currentView(const AirLiftData& liveData);
 // closes, so a brightness change made in Settings survives leaving the menu
 // instead of silently reverting to default.
 uint8_t currentBacklightPct();
+
+// The Settings screen's ROTATE 180 toggle, persisted in NVS (unlike
+// BACKLIGHT/INVERT above) so a physically upside-down mount survives a power
+// cycle. begin() loads the saved value; each board's display::begin() reads
+// this once at boot to set its initial orientation, and menu.cpp calls
+// display::setRotate180() immediately when the toggle changes so the screen
+// flips live without needing a reboot.
+bool rotate180();
 
 }  // namespace menu
