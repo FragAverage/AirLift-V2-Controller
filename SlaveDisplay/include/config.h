@@ -3,15 +3,22 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Five boards (seven envs -- round21 and lcd147 each have two
+// Five boards (nine envs -- cyd, round128, round21, and lcd147 each have two
 // rendering-backend variants) share this firmware:
 //
 //   - ESP32-2432S028R "Cheap Yellow Display" (default) — ILI9341 320x240
-//     landscape + XPT2046 resistive touch on its own SPI bus. Rendered with
-//     TFT_eSPI (src/display.cpp, src/touch.cpp).
-//   - Waveshare ESP32-S3-Touch-LCD-1.28 (build flag DISPLAY_ROUND=1) —
-//     GC9A01 240x240 round panel + CST816T capacitive touch on I2C. Also
-//     TFT_eSPI, same two files.
+//     landscape + XPT2046 resistive touch on its own SPI bus. Two rendering
+//     backends: env:cyd (raw TFT_eSPI draw calls — src/display.cpp, shared
+//     with round128/lcd147) and env:cyd_lvgl (LVGL — src/display_cyd_lvgl.cpp,
+//     include/lv_conf.h), both using src/touch.cpp unchanged.
+//   - Waveshare ESP32-S3-LCD-1.28 (build flag DISPLAY_ROUND=1) — plain,
+//     non-touch, CNC metal case variant. GC9A01 240x240 round panel, no
+//     touch hardware on this unit (CST816T support stays compiled in behind
+//     ENABLE_TOUCH=0 for boards that do have it). Two rendering backends:
+//     env:round128 (raw TFT_eSPI draw calls — src/display.cpp, shared with
+//     cyd/lcd147) and env:round128_lvgl (LVGL —
+//     src/display_round128_lvgl.cpp, include/lv_conf.h), both using
+//     src/touch.cpp (ENABLE_TOUCH=0 stub) unchanged.
 //   - Waveshare ESP32-S3-Touch-LCD-2.1 (build flag BOARD_ROUND21=1) —
 //     ST7701 480x480 round panel driven over the ESP32-S3's RGB-parallel LCD
 //     peripheral (not SPI), reset/CS/power gated through a TCA9554 I2C IO
@@ -212,6 +219,20 @@
 // Font 4 (26px) does.
 #define VALUE_FONT_CORNER 4
 #define VALUE_FONT_STRIP  4
+
+// Same sizing intent as VALUE_FONT_CORNER/VALUE_FONT_STRIP above, in px
+// instead of a TFT_eSPI font ID -- round128_lvgl (display_round128_lvgl.cpp)
+// maps these to DSEG7 (corner/strip digits) or the nearest enabled
+// lv_font_montserrat_* (everything else). This board's cells are the exact
+// same height as BOARD_LCD147's (CELL_VALUE_H=28, STRIP_VALUE_H=22 both) --
+// lcd147's numbers were copied from here in the first place, so these are
+// identical rather than coincidentally matching. Unused, harmless macros in
+// the non-LVGL round128 build.
+#define VALUE_FONT_PX_CORNER 22
+#define VALUE_FONT_PX_STRIP  16
+#define LABEL_FONT_PX        14
+#define STATUS_FONT_PX        16
+#define TITLE_FONT_PX          20
 
 // Splash text, tuned to stay inside the safe circle (see grid note above)
 // rather than the CYD's wider landscape budget.
@@ -428,6 +449,20 @@
 
 #define VALUE_FONT_CORNER 6
 #define VALUE_FONT_STRIP  4
+
+// Same sizing intent as VALUE_FONT_CORNER/VALUE_FONT_STRIP above, in px
+// instead of a TFT_eSPI font ID -- env:cyd_lvgl (display_cyd_lvgl.cpp) maps
+// these to DSEG7 (corner/strip digits) or the nearest enabled
+// lv_font_montserrat_* (everything else). CELL_VALUE_H=58 here is closest to
+// BOARD_ROUND21's 56 (-> the same 48px DSEG7 asset); STRIP_VALUE_H=28 sits
+// between lcd147's 22 and round21's 44, so 22px leaves a few px of headroom
+// rather than nearly filling the cell. Unused, harmless macros in the
+// non-LVGL cyd build.
+#define VALUE_FONT_PX_CORNER 48
+#define VALUE_FONT_PX_STRIP  22
+#define LABEL_FONT_PX        16
+#define STATUS_FONT_PX        16
+#define TITLE_FONT_PX          20
 
 #define SPLASH_HANDLE_FONT 4
 #define SPLASH_HANDLE_SIZE 2
