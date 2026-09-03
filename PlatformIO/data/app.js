@@ -110,7 +110,7 @@ function init() {
 function initSettings() {
   // Checkboxes — save immediately on change
   const checkboxIds = ["passThroughMode", "airOutOnIgnOff", "canBroadcastEnabled",
-    "espnowEnabled", "benchMode", "airUpOnFobDouble", "airDownOnFobDouble"];
+    "espnowEnabled", "airUpOnFobDouble", "airDownOnFobDouble"];
   checkboxIds.forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", () => saveSetting(id, el.checked));
@@ -403,7 +403,6 @@ function renderSettings(s) {
   cb("passThroughMode",   s.passThroughMode);
   cb("canBroadcastEnabled", s.canBroadcastEnabled);
   cb("espnowEnabled", s.espnowEnabled);
-  cb("benchMode", s.benchMode);
   cb("usePowertrainCan", s.usePowertrainCan);
   cb("useComfortCan", s.useComfortCan);
   cb("savvyCanWifiEnabled", s.savvyCanWifiEnabled);

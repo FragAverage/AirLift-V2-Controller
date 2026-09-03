@@ -409,5 +409,7 @@ enum VehicleLockState : uint8_t {
 };
 
 constexpr const char* wifiHostName = "AirLift-V2 Controller";
+// WPA2 requires 8-63 chars; this is exactly the minimum.
+constexpr const char* wifiPassword = "BMWE4GFK";
 
 constexpr uint32_t taskIdleDelayMs = 1;

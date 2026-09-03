@@ -33,7 +33,6 @@ static const char* kKeyBootDelay     = "bootDelay";
 static const char* kKeyCanBcEn       = "canBcEn";
 static const char* kKeyCanBcId       = "canBcId";
 static const char* kKeyEspNow         = "espnowEn";
-static const char* kKeyBenchMode      = "benchMode";
 static const char* kKeySavvyWifi      = "savvyWifi";
 static const char* kKeySavvySerial    = "savvySerial";
 static const char* kKeyPowertrainCan  = "powertrainCan";
@@ -96,7 +95,6 @@ void loadPreferences() {
     canBroadcastId = id;
   }
   espnowEnabled = preferences.getBool(kKeyEspNow, true);
-  benchMode     = preferences.getBool(kKeyBenchMode, false);
   savvyCanWifiEnabled = preferences.getBool(kKeySavvyWifi, false);
   savvyCanSerialEnabled = preferences.getBool(kKeySavvySerial, false);
   if (savvyCanSerialEnabled) savvyCanWifiEnabled = false;
@@ -112,7 +110,7 @@ void setupWiFi() {
   // Channel is pinned (rather than left to the default) because the slave
   // display parks its radio on kEspNowChannel at boot and never associates —
   // if the AP lands elsewhere, ESP-NOW packets are simply never heard.
-  WiFi.softAP(wifiHostName, nullptr, kEspNowChannel);
+  WiFi.softAP(wifiHostName, wifiPassword, kEspNowChannel);
   WiFi.setSleep(false);
   DEBUG_WIFI("AP up: SSID=%s  IP=%s", wifiHostName, WiFi.softAPIP().toString().c_str());
 }
@@ -248,7 +246,6 @@ void setupApiServer() {
     doc["canBroadcastEnabled"] = (bool)canBroadcastEnabled;
     doc["canBroadcastId"]      = canBroadcastId;
     doc["espnowEnabled"]       = (bool)espnowEnabled;
-    doc["benchMode"]           = (bool)benchMode;
     doc["savvyCanWifiEnabled"] = (bool)savvyCanWifiEnabled;
     doc["savvyCanSerialEnabled"] = (bool)savvyCanSerialEnabled;
     doc["usePowertrainCan"] = (bool)usePowertrainCan;
@@ -334,9 +331,6 @@ void setupApiServer() {
       if (!doc["espnowEnabled"].isNull()) {
         espnowEnabled = doc["espnowEnabled"].as<bool>();
       }
-      if (!doc["benchMode"].isNull()) {
-        benchMode = doc["benchMode"].as<bool>();
-      }
 
       if (!doc["savvyCanWifiEnabled"].isNull()) {
         savvyCanSetWifiEnabled(doc["savvyCanWifiEnabled"].as<bool>());
@@ -370,7 +364,6 @@ void setupApiServer() {
       preferences.putBool(kKeyCanBcEn, (bool)canBroadcastEnabled);
       preferences.putUInt(kKeyCanBcId, canBroadcastId);
       preferences.putBool(kKeyEspNow, (bool)espnowEnabled);
-      preferences.putBool(kKeyBenchMode, (bool)benchMode);
       preferences.putBool(kKeySavvyWifi, (bool)savvyCanWifiEnabled);
       preferences.putBool(kKeySavvySerial, (bool)savvyCanSerialEnabled);
       preferences.putBool(kKeyPowertrainCan, (bool)usePowertrainCan);
@@ -732,36 +725,16 @@ void setupApiServer() {
 // ----------------------------------------------------------------------------
 // power_manager integration (universal reduced-power module)
 // ----------------------------------------------------------------------------
-// These override the weak hooks in power_manager.cpp. The device stays fully
-// awake while ANY client is associated to the AP. Once the last client leaves,
-// the manager's idle timer runs, then turns the radio off and drops the CPU
-// clock. A fresh burst of CAN traffic (see pollCanRx wake-on-burst) or an
-// ignition power-cycle brings WiFi back.
+// These override the weak hooks in power_manager.cpp.
 
-// Spec: reduced power is entered 1 minute after the last WiFi CLIENT
-// disconnects — independent of CAN activity. CAN traffic must NOT hold WiFi on
-// (that would keep the radio up, and the regulator hot, the whole time the car
-// is running). CAN only WAKES us from reduced power via pollCanRx(); it does
-// not keep us awake here.
+// Spec: the AP/ESP-NOW radio stays up unconditionally for as long as the
+// master has power. The board is switched-12V powered from ignition, so
+// "has power" already means "car running" — there's no in-vehicle case where
+// we're powered but should be unreachable, so the idle-timeout radio-off path
+// (originally meant to save regulator heat once the user stopped interacting)
+// never applies here.
 bool powerIsBusy() {
-  // Bench-test override (Settings -> Slave Display -> Bench Mode): forces
-  // the radio to stay up unconditionally. Needed because ignitionOn is
-  // derived purely from CAN bus activity (see tasks.cpp's ignPresent() —
-  // the dedicated ignition-sense GPIO was removed and repurposed for the MFL
-  // signal), so it's legitimately false with no CAN bus connected, which
-  // looks identical to "car parked" from here. Leave this off for a real
-  // install: the board there is switched-12V powered from ignition, so it's
-  // only ever running with real CAN traffic present, and ignitionOn tracks
-  // correctly on its own.
-  if (benchMode) return true;
-
-  // The slave display is a live gauge cluster: it must keep updating whenever
-  // the car is running, and ESP-NOW dies with the radio. So while the broadcast
-  // is enabled AND the ignition is on, the radio stays up. Ignition off (car
-  // parked, display unpowered) still reduces exactly as before, which is the
-  // case the regulator-heat rule was written for.
-  if (espnowEnabled && ignitionOn) return true;
-  return WiFi.softAPgetStationNum() > 0;
+  return true;
 }
 
 // ACTIVE -> REDUCED: before the radio drops, close the web server AND drop any

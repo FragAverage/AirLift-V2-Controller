@@ -85,17 +85,6 @@ extern volatile bool     espnowEnabled;
 extern volatile uint32_t espnowSent;
 extern volatile uint32_t espnowErrors;
 
-// Bench-test override: forces power_manager's powerIsBusy() true regardless
-// of ignition/CAN presence, so the AP/ESP-NOW radio never auto-sleeps on a
-// bench with no CAN bus connected (ignitionOn is derived purely from CAN
-// activity — see tasks.cpp's ignPresent() — so it's legitimately false with
-// no CAN traffic, which is correct in-vehicle behavior but not what you want
-// mid-development). Off by default — leave it off for a real install, where
-// the board is switched-12V powered from ignition anyway, so this condition
-// doesn't come up: real CAN traffic means ignitionOn already tracks
-// correctly whenever the board has power at all.
-extern volatile bool     benchMode;
-
 extern volatile bool     savvyCanWifiEnabled;
 extern volatile bool     savvyCanSerialEnabled;
 extern volatile uint32_t savvyCanFramesDropped;
