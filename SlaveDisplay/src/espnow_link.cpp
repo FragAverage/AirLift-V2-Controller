@@ -22,6 +22,9 @@ volatile uint32_t lastRxMs  = 0;
 volatile bool  newButtons      = false;
 AirLiftButtons receivedButtons = {};
 
+volatile bool      newPresetNames      = false;
+AirLiftPresetNames receivedPresetNames = {};
+
 void handlePacket(const uint8_t* mac, const uint8_t* data, int len) {
   (void)mac;
 
@@ -42,8 +45,17 @@ void handlePacket(const uint8_t* mac, const uint8_t* data, int len) {
     return;
   }
 
-  Serial.printf("[NOW] dropped packet: %d bytes (expected %u or %u)\n", len,
-                (unsigned)sizeof(AirLiftData), (unsigned)sizeof(AirLiftButtons));
+  if (len == (int)sizeof(AirLiftPresetNames)) {
+    portENTER_CRITICAL(&mux);
+    memcpy(&receivedPresetNames, data, sizeof(AirLiftPresetNames));
+    newPresetNames = true;
+    portEXIT_CRITICAL(&mux);
+    return;
+  }
+
+  Serial.printf("[NOW] dropped packet: %d bytes (expected %u, %u or %u)\n", len,
+                (unsigned)sizeof(AirLiftData), (unsigned)sizeof(AirLiftButtons),
+                (unsigned)sizeof(AirLiftPresetNames));
 }
 
 // Arduino-ESP32 3.x (IDF 5) changed the callback signature; support both.
@@ -124,6 +136,18 @@ bool takeButtons(AirLiftButtons& out) {
     out        = receivedButtons;
     newButtons = false;
     got        = true;
+  }
+  portEXIT_CRITICAL(&mux);
+  return got;
+}
+
+bool takePresetNames(AirLiftPresetNames& out) {
+  bool got = false;
+  portENTER_CRITICAL(&mux);
+  if (newPresetNames) {
+    out            = receivedPresetNames;
+    newPresetNames = false;
+    got            = true;
   }
   portEXIT_CRITICAL(&mux);
   return got;

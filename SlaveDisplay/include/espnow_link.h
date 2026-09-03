@@ -24,6 +24,12 @@ bool take(AirLiftData& out);
 // this rides its own, faster broadcast (see PlatformIO/src/espnow_tx.cpp).
 bool takeButtons(AirLiftButtons& out);
 
+// Returns true (once) when a fresh AirLiftPresetNames packet has arrived,
+// copying it into `out`. Clears the new-data flag. Its own packet type,
+// separate from AirLiftData — see PlatformIO/src/espnow_tx.cpp — since it
+// rides a much slower broadcast (names rarely change).
+bool takePresetNames(AirLiftPresetNames& out);
+
 // Broadcast a confirmed menu action to the master (e.g. CMD_SELECT_PRESET).
 void sendCommand(uint8_t cmd, uint8_t param);
 

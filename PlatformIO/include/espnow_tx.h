@@ -5,11 +5,13 @@
 // ---------------------------------------------------------------------------
 // ESP-NOW link to the AirLift V2 slave display (../SlaveDisplay).
 //
-// Broadcasts two packet types to FF:FF:FF:FF:FF:FF, so the display needs no
+// Broadcasts three packet types to FF:FF:FF:FF:FF:FF, so the display needs no
 // pairing and we need no knowledge of its MAC:
 //   - AirLiftData (~10 Hz): corner/tank pressures, preset, status.
 //   - AirLiftButtons (~20 Hz): live MFL steering-wheel button state, for the
 //     display's on-screen menu.
+//   - AirLiftPresetNames (~0.5 Hz): the 8 configurable preset display names,
+//     so the display's menu/gauge text matches the web UI.
 // Also RECEIVES AirLiftCommand from the display (a confirmed menu action,
 // e.g. "select preset N") and acts on it via queuePresetByIndex() — the only
 // inbound path this firmware has from the display. Same broadcast/no-pairing

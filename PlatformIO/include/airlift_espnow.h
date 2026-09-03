@@ -56,6 +56,23 @@ enum : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
+// Master -> slave: the 8 configurable preset display names (web UI ->
+// presetNames[] in globals.h), so the display's menu/gauge preset text
+// matches what was actually configured instead of a hardcoded guess. Sent at
+// a fraction of AirLiftData's rate (see kEspNowPresetNamesPeriodMs) since
+// these change rarely — no reason to spend airtime on them every tick.
+// Fixed-width, NUL-padded like presetNames[] itself; not necessarily
+// NUL-terminated if a name fills all 24 bytes, so the receiver must treat it
+// the same defensive way (or just re-terminate defensively on receipt).
+// ---------------------------------------------------------------------------
+typedef struct {
+  char names[8][24];
+} AirLiftPresetNames;
+
+static_assert(sizeof(AirLiftPresetNames) == 192,
+              "AirLiftPresetNames layout changed — the slave display must be updated to match");
+
+// ---------------------------------------------------------------------------
 // Slave -> master: a confirmed menu action. Broadcast, unencrypted, same
 // trust model as AirLiftData/AirLiftButtons — every command is one of a
 // fixed, small set (a preset slot, or one of the eight discrete manual

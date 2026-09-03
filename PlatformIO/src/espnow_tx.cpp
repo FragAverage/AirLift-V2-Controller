@@ -15,8 +15,9 @@ namespace {
 // Broadcast: the display needs no pairing and we need no knowledge of its MAC.
 const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-uint32_t s_lastButtonSendMs = 0;
-uint8_t  s_buttonSeq        = 0;
+uint32_t s_lastButtonSendMs      = 0;
+uint8_t  s_buttonSeq             = 0;
+uint32_t s_lastPresetNamesSendMs = 0;
 
 uint8_t buttonsToBitmask(const MflButtons& b) {
   uint8_t mask = 0;
@@ -244,9 +245,10 @@ void espnowTxInit() {
 
   esp_now_register_recv_cb(onRecv);
 
-  s_running          = true;
-  s_lastSendMs       = 0;
-  s_lastButtonSendMs = 0;
+  s_running               = true;
+  s_lastSendMs            = 0;
+  s_lastButtonSendMs      = 0;
+  s_lastPresetNamesSendMs = 0;
 
   uint8_t ch = 0;
   wifi_second_chan_t sec = WIFI_SECOND_CHAN_NONE;
@@ -298,6 +300,19 @@ void espnowTxTick() {
     b.seq     = s_buttonSeq++;
 
     if (esp_now_send(kBroadcastMac, (const uint8_t*)&b, sizeof(b)) == ESP_OK) {
+      espnowSent++;
+    } else {
+      espnowErrors++;
+    }
+  }
+
+  if ((uint32_t)(now - s_lastPresetNamesSendMs) >= kEspNowPresetNamesPeriodMs) {
+    s_lastPresetNamesSendMs = now;
+
+    AirLiftPresetNames pn = {};
+    memcpy(pn.names, presetNames, sizeof(pn.names));
+
+    if (esp_now_send(kBroadcastMac, (const uint8_t*)&pn, sizeof(pn)) == ESP_OK) {
       espnowSent++;
     } else {
       espnowErrors++;

@@ -42,20 +42,21 @@ void demoTick() {
 }
 #endif
 
+// Preset display names, synced from the master over ESP-NOW (AirLiftPresetNames
+// -- see espnow_link.h/kEspNowPresetNamesPeriodMs on the master). These
+// defaults are what's shown until the first packet arrives after boot (or if
+// the master is running old firmware that never sends one); they are not
+// necessarily what the master actually has configured.
+char presetNamesBuf[8][24] = {
+  "SLAM", "DRIVE", "SPORT", "PRESET 4",
+  "PRESET 5", "PRESET 6", "PRESET 7", "PRESET 8",
+};
+
 }  // namespace
 
 const char* presetName(uint8_t preset) {
-  switch (preset) {
-    case 1: return "SLAM";
-    case 2: return "DRIVE";
-    case 3: return "SPORT";
-    case 4: return "PRESET 4";
-    case 5: return "PRESET 5";
-    case 6: return "PRESET 6";
-    case 7: return "PRESET 7";
-    case 8: return "PRESET 8";
-    default: return "---";
-  }
+  if (preset < 1 || preset > 8) return "---";
+  return presetNamesBuf[preset - 1];
 }
 
 void setup() {
@@ -90,6 +91,20 @@ void loop() {
   // Menu state comes from the master's MFL button broadcast regardless of
   // DEMO_MODE (that flag only fakes pressure telemetry).
   menu::poll();
+
+  // Preset names sync independently of DEMO_MODE/telemetry, same reasoning
+  // as menu::poll() above -- a real master nearby should still correct the
+  // placeholder names even while bench-testing fake pressures.
+  {
+    AirLiftPresetNames pn;
+    if (espnow::takePresetNames(pn)) {
+      memcpy(presetNamesBuf, pn.names, sizeof(presetNamesBuf));
+      // The wire format is NUL-padded, not guaranteed NUL-terminated (a name
+      // that fills all 24 bytes) -- force it so presetName()'s callers can
+      // keep treating this as a plain C string.
+      for (auto& name : presetNamesBuf) name[sizeof(name) - 1] = '\0';
+    }
+  }
 
   // Telemetry ingestion runs unconditionally, whether or not the menu is
   // open — the MANUAL_ACTIVE screen shows live pressures while you hold

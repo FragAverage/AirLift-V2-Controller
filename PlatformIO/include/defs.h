@@ -373,6 +373,12 @@ constexpr uint32_t kEspNowPeriodMs  = 100;   // ~10 Hz
 // MFL button-state broadcast (AirLiftButtons) — faster than the pressure
 // broadcast so on-screen menu navigation feels responsive.
 constexpr uint32_t kEspNowButtonPeriodMs = 50;   // ~20 Hz
+// Preset-name broadcast (AirLiftPresetNames) — these only change when someone
+// edits them in the web UI, so there is no reason to spend airtime on them at
+// AirLiftData's rate. This just needs to be frequent enough that a freshly
+// booted (or reconnected) display picks up the current names within a few
+// seconds of link-up.
+constexpr uint32_t kEspNowPresetNamesPeriodMs = 2000;   // ~0.5 Hz
 // A held button is only "held" while its polls keep arriving (~5/s from the
 // handheld); past this it has been released.
 constexpr uint32_t kEspNowButtonFreshMs = 400;
